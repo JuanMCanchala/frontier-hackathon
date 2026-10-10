@@ -6,6 +6,8 @@ import pytest
 from eval.desktop_lock import DesktopLock
 from eval.imgdiff import Thresholds
 from eval.incidente import (
+    BAND,
+    BAND_SCREEN,
     SCREENS,
     RoundResult,
     Tracker,
@@ -110,3 +112,66 @@ async def test_busy_and_failed_rounds_are_logged_and_the_loop_survives(
 
     kinds = [json.loads(x)["tipo"] for x in (base / "log.jsonl").read_text().splitlines()]
     assert kinds == ["ocupado", "error"]
+
+
+async def test_passive_mode_ignores_the_lock_and_watches_the_header(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("DESKTOP_URL", "http://desk.invalid")
+    monkeypatch.setenv("DESKTOP_PASSWORD", "pw")
+    base = tmp_path / "inc"
+    (base / "referencia").mkdir(parents=True)
+    reference = Image.new("RGB", (1280, 800), (230, 230, 230))
+    ImageDraw.Draw(reference).rectangle((0, 0, 1279, 33), fill=(30, 50, 100))
+    for name in SCREENS:
+        reference.save(base / "referencia" / f"{name}.png")
+    # Another screen of the same app with a new theme: the header colour changes.
+    new_theme = Image.new("RGB", (1280, 800), (255, 255, 255))
+    ImageDraw.Draw(new_theme).rectangle((0, 0, 1279, 33), fill=(15, 82, 87))
+
+    async def passive(url: str, password: str) -> RoundResult:
+        return RoundResult({BAND_SCREEN: new_theme.crop(BAND)}, 200, 0.1)
+
+    async def no_sleep(_: float) -> None:
+        return None
+
+    lock_path = tmp_path / "d.lock"
+    other = DesktopLock(lock_path)
+    assert other.try_acquire()  # somebody else holds the desktop
+    try:
+        await cmd_vigilar(
+            base, DesktopLock(lock_path), 0, Thresholds(), 1, no_sleep, passive, passive=True
+        )
+    finally:
+        other.release()
+
+    entries = [json.loads(x) for x in (base / "log.jsonl").read_text().splitlines()]
+    assert not any(e.get("tipo") == "ocupado" for e in entries)
+    assert any(e.get("pantalla") == BAND_SCREEN and e.get("cambio") for e in entries)
+
+
+async def test_passive_mode_accepts_known_header_variants(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("DESKTOP_URL", "http://desk.invalid")
+    monkeypatch.setenv("DESKTOP_PASSWORD", "pw")
+    base = tmp_path / "inc"
+    (base / "referencia").mkdir(parents=True)
+    header = Image.new("RGB", (1280, 62), (40, 75, 60))
+    dimmed = Image.new("RGB", (1280, 62), (20, 38, 30))  # startup modal overlay
+    header.save(base / "referencia" / f"{BAND_SCREEN}.png")
+    dimmed.save(base / "referencia" / f"{BAND_SCREEN}-modal.png")
+    for name in SCREENS:
+        Image.new("RGB", (1280, 800)).save(base / "referencia" / f"{name}.png")
+
+    async def shows_modal(url: str, password: str) -> RoundResult:
+        return RoundResult({BAND_SCREEN: dimmed.copy()}, 200, 0.1)
+
+    async def no_sleep(_: float) -> None:
+        return None
+
+    lock = DesktopLock(tmp_path / "d.lock")
+    await cmd_vigilar(base, lock, 0, Thresholds(), 1, no_sleep, shows_modal, passive=True)
+
+    entries = [json.loads(x) for x in (base / "log.jsonl").read_text().splitlines()]
+    assert not any(e.get("cambio") for e in entries)
