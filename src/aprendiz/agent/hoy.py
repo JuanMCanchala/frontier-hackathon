@@ -1,5 +1,6 @@
 """The app's "Today": read from the header as text by a model, parsed and computed by code."""
 
+import calendar
 import logging
 import re
 import unicodedata
@@ -33,6 +34,9 @@ _NUMERIC = re.compile(r"(\d{1,4})[/\-.](\d{1,2})[/\-.](\d{1,4})")
 _WORDED = re.compile(r"(\d{1,2})\s+(?:de\s+)?([a-z]+)\.?\s+(?:de\s+)?(\d{4})")
 _OFFSET = re.compile(r"hoy_app(?:\s*([+-])\s*(\d+))?")
 _WEEKDAY_EXPR = re.compile(r"(proximo|anterior)_([a-z]+)")
+_ABSOLUTE = re.compile(
+    r"(inicio_mes|fin_mes|inicio_an(?:io|o)|fin_an(?:io|o)|fecha):(\d{4})(?:-(\d{2}))?(?:-(\d{2}))?"
+)
 
 
 class ParamError(ValueError):
@@ -107,8 +111,79 @@ async def read_today(
     return parsed
 
 
-def _resolve(expression: str, hoy: date) -> date:
+def _resolve_absolute(expr: str, expression: str) -> date | None:
+    """Period and absolute-date expressions: they need no reading of the screen."""
+    match = _ABSOLUTE.fullmatch(expr)
+    if match is None:
+        return None
+    kind, year, month, day = match.group(1), int(match.group(2)), match.group(3), match.group(4)
+    try:
+        if kind.endswith("_mes") and month and not day:
+            last = calendar.monthrange(year, int(month))[1]
+            return date(year, int(month), 1 if kind == "inicio_mes" else last)
+        if kind.startswith(("inicio_an", "fin_an")) and not month:
+            return date(year, 1, 1) if kind.startswith("inicio") else date(year, 12, 31)
+        if kind == "fecha" and month and day:
+            return date(year, int(month), int(day))
+    except (ValueError, calendar.IllegalMonthError) as exc:
+        raise ParamError(f"invalid date in parameter expression: {expression!r}") from exc
+    raise ParamError(f"malformed parameter expression: {expression!r}")
+
+
+def needs_today(parametros: dict[str, str]) -> bool:
+    """Whether any parameter depends on the app's "Today" (absolute periods and dates do not)."""
+    return any(_ABSOLUTE.fullmatch(_fold(expr)) is None for expr in parametros.values())
+
+
+_LAST_DAYS = re.compile(r"ultimos_dias:(\d{1,3})")
+
+
+def _month_start(day: date) -> date:
+    return day.replace(day=1)
+
+
+def _month_end(day: date) -> date:
+    return day.replace(day=calendar.monthrange(day.year, day.month)[1])
+
+
+def _named(name: str, hoy: date) -> date | None:
+    """Named relative dates. Weeks run Monday to Sunday."""
+    week = hoy - timedelta(days=hoy.weekday())
+    prev_month_end = _month_start(hoy) - timedelta(days=1)
+    table = {
+        "hoy": hoy,
+        "ayer": hoy - timedelta(days=1),
+        "anteayer": hoy - timedelta(days=2),
+        "manana": hoy + timedelta(days=1),
+        "semana_actual_inicio": week,
+        "semana_actual_fin": week + timedelta(days=6),
+        "semana_pasada_inicio": week - timedelta(days=7),
+        "semana_pasada_fin": week - timedelta(days=1),
+        "mes_actual_inicio": _month_start(hoy),
+        "mes_actual_fin": _month_end(hoy),
+        "mes_pasado_inicio": _month_start(prev_month_end),
+        "mes_pasado_fin": prev_month_end,
+        "anio_actual_inicio": date(hoy.year, 1, 1),
+        "anio_actual_fin": date(hoy.year, 12, 31),
+    }
+    return table.get(name)
+
+
+def _resolve(expression: str, hoy: date | None) -> date:
     expr = _fold(expression)
+    absolute = _resolve_absolute(expr, expression)
+    if absolute is not None:
+        return absolute
+    if hoy is None:
+        raise ParamError(f"parameter {expression!r} needs the app's date, which was not read")
+    named = _named(expr, hoy)
+    if named is not None:
+        return named
+    last_days = _LAST_DAYS.fullmatch(expr)
+    if last_days:  # start of "the last N days"; the end is "hoy"
+        return hoy - timedelta(days=max(int(last_days.group(1)), 1) - 1)
+    if expr in _WEEKDAYS:  # "el lunes": the most recent one strictly before today
+        return hoy - timedelta(days=(hoy.weekday() - _WEEKDAYS[expr] - 1) % 7 + 1)
     offset = _OFFSET.fullmatch(expr)
     if offset:
         days = int(offset.group(2) or 0)
@@ -122,10 +197,12 @@ def _resolve(expression: str, hoy: date) -> date:
     raise ParamError(f"unsupported parameter expression: {expression!r}")
 
 
-def resolve_params(parametros: dict[str, str], hoy: date) -> dict[str, date]:
+def resolve_params(parametros: dict[str, str], hoy: date | None) -> dict[str, date]:
     """Resolve every plan parameter against the app's date; the arithmetic is code, not a model.
 
-    "proximo_<weekday>" is the first such day strictly after today; "anterior_<weekday>" the last
-    one strictly before.
+    "proximo_<weekday>" is the first such day strictly after today; "anterior_<weekday>" (and the
+    bare weekday name) the last one strictly before. Named dates: hoy, ayer, anteayer, manana,
+    semana_actual/pasada_inicio/fin (Monday to Sunday), mes_actual/pasado_inicio/fin,
+    anio_actual_inicio/fin, and ultimos_dias:N (the first day of the last N days).
     """
     return {name: _resolve(expr, hoy) for name, expr in parametros.items()}

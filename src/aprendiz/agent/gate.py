@@ -10,7 +10,7 @@ from aprendiz.agent.fallback import ask_json_fb
 from aprendiz.agent.llm import ImageInput, Llm, LlmError, Message
 from aprendiz.agent.schemas import Action, Plan
 from aprendiz.agent.structured import InvalidReply
-from aprendiz.agent.textmatch import exact_hint
+from aprendiz.agent.textmatch import exact_hint, fragment_of, root_fragment_of, stems
 
 log = logging.getLogger(__name__)
 
@@ -28,8 +28,10 @@ would change. Reply with ONE JSON object:
  "cambios": [{"campo": str, "inicial": str|null, "nuevo": str}],
  "decision": "permitir"|"denegar_corregible"|"denegar_final",
  "motivo": str, "datos": [str]}
-- candidatos: every entity in the search-result screenshots that matches the plan's entity,
-  ignoring case and accents, each with the value that tells it apart (document number).
+- candidatos: every entity in the MOST RECENT search-results screenshot that matches the plan's
+  entity, ignoring case and accents, each with the value that tells it apart (document number).
+  Uniqueness is judged ONLY on that image: earlier searches are not provided, and a filtered
+  search that shows a single exact match means the entity is unique.
 - ya_existe: for a create, an entity equal to the one being created is already listed.
 - cambios: only fields whose value differs between the form-when-opened screenshot and the value
   that will be written. Compare against the initial values, not absolute values: an edit form shows
@@ -97,6 +99,8 @@ class EvidenceContext:
     # The write the previous step just had authorized, if any: lets the auditor accept a
     # confirmation dialog of that same write instead of counting it as a new one.
     continuacion_de: str | None = None
+    # The task text: the one trusted input. Any literal fragment of it may be typed.
+    tarea: str = ""
 
 
 def _norm(value: str) -> str:
@@ -113,7 +117,31 @@ def allowed_values(plan: Plan, parametros: dict[str, str]) -> set[str]:
                     values.add(_norm(parametros[raw]))
             else:
                 values.add(_norm(raw))
+    # Parameters are computed by code from the task and the app's date, never by a model.
+    values.update(_norm(v) for v in parametros.values())
     return values
+
+
+def value_allowed(
+    value: str,
+    plan: Plan,
+    evidencia: EvidenceContext,
+    *,
+    select: bool = False,
+    allowed: set[str] | None = None,
+) -> bool:
+    """A value may be written if it is a plan value, a parameter resolved by code, or a literal
+    fragment of the task. A select's value is bounded by the UI's options, so there the match
+    against the task or the plan is by word stems (entregado/entregados/entregada)."""
+    allowed = allowed if allowed is not None else allowed_values(plan, evidencia.parametros)
+    if _norm(value) in allowed or fragment_of(evidencia.tarea, value):
+        return True
+    if not select:
+        return False
+    if root_fragment_of(evidencia.tarea, value):
+        return True
+    wanted = stems(value)
+    return any(stems(o) == wanted for o in allowed_originals(plan, evidencia.parametros))
 
 
 def allowed_originals(plan: Plan, parametros: dict[str, str]) -> list[str]:
@@ -129,11 +157,12 @@ def allowed_originals(plan: Plan, parametros: dict[str, str]) -> list[str]:
     return values
 
 
-def _typed_values(accion: Action) -> list[str]:
+def _typed_items(accion: Action) -> list[tuple[str, bool]]:
+    """(value, is_select) for everything the action writes."""
     if accion.tipo == "fill_form":
-        return [c.valor for c in accion.campos or []]
+        return [(c.valor, c.tipo == "select") for c in accion.campos or []]
     if accion.tipo == "type" and accion.texto:
-        return [accion.texto]
+        return [(accion.texto, False)]
     return []
 
 
@@ -145,19 +174,51 @@ def _deny(motivo: str, datos: list[str] | None = None, final: bool = False) -> V
     )
 
 
+_MIN_FILTER_CHARS = 3
+
+
+def _is_filter_configuration(accion: Action, evidencia: EvidenceContext) -> bool:
+    """In a read-only plan, a fill_form or typing whose values all come from the task (free text:
+    a literal fragment of 3+ characters; selects: also by word stem) or are date parameters
+    resolved by code only configures filters. The effect detector stays as the second line."""
+    if accion.tipo not in ("fill_form", "type"):
+        return False
+    items = _typed_items(accion)
+    params = {_norm(v) for v in evidencia.parametros.values()}
+    if not items:
+        return False
+    for value, is_select in items:
+        if _norm(value) in params:
+            continue
+        if len(value.strip()) < _MIN_FILTER_CHARS:
+            return False
+        if fragment_of(evidencia.tarea, value):
+            continue
+        if not (is_select and root_fragment_of(evidencia.tarea, value)):
+            return False
+    return True
+
+
 def _precheck(
     plan: Plan, accion: Action, evidencia: EvidenceContext, state: GateState
 ) -> Verdict | None:
     """Rules that need no model."""
     writes = plan.escrituras_permitidas
-    if accion.tipo == "type" and plan.entidad and _norm(accion.texto or "") == _norm(plan.entidad):
-        # Typing the entity's own name is how a search starts; it persists nothing, and an
-        # autosave would still be caught by the effect detector. Without this, a search box
-        # misread as a record field deadlocks the search-before-write rule below.
-        return Verdict(
-            decision="permitir", motivo="typing the entity name to search persists nothing"
-        )
+    texto = (accion.texto or "").strip()
+    if accion.tipo == "type" and (
+        (plan.entidad and _norm(texto) == _norm(plan.entidad))
+        or (len(texto) >= 3 and fragment_of(evidencia.tarea, texto))
+    ):
+        # Typing a literal fragment of the task (the entity name, a filter value) persists
+        # nothing by itself; an autosave would still be caught by the effect detector. Without
+        # this, a search box misread as a record field blocks searches and question filters.
+        return Verdict(decision="permitir", motivo="typing a fragment of the task persists nothing")
     if not writes:
+        if _is_filter_configuration(accion, evidencia):
+            return Verdict(
+                decision="permitir",
+                motivo="setting filters with values from the task persists nothing",
+            )
         return _deny("the plan allows no writes")
     if (
         state.exports_authorized
@@ -166,8 +227,8 @@ def _precheck(
     ):
         return _deny("the single allowed export was already authorized", final=True)
     allowed = allowed_values(plan, evidencia.parametros)
-    for value in _typed_values(accion):
-        if _norm(value) not in allowed:
+    for value, is_select in _typed_items(accion):
+        if not value_allowed(value, plan, evidencia, select=is_select, allowed=allowed):
             hint = exact_hint(value, allowed_originals(plan, evidencia.parametros))
             return _deny(f"value {value!r} is not a value of the plan{hint}")
     needs_search = any(w.accion in ("create", "update", "delete") for w in writes)
@@ -178,7 +239,7 @@ def _precheck(
 
 
 def _postcheck(
-    plan: Plan, reply: _AuditorReply, evidencia: EvidenceContext, state: GateState
+    plan: Plan, accion: Action, reply: _AuditorReply, evidencia: EvidenceContext, state: GateState
 ) -> Verdict | None:
     """Rules the code enforces over what the auditor reported, whatever it decided."""
     if len(reply.candidatos) > 1:
@@ -197,7 +258,11 @@ def _postcheck(
     for change in reply.cambios:
         if change.inicial is not None and _norm(change.inicial) == _norm(change.nuevo):
             continue
-        if _norm(change.nuevo) not in allowed:
+        is_select = any(
+            c.tipo == "select" and stems(c.valor) == stems(change.nuevo)
+            for c in accion.campos or []
+        )
+        if not value_allowed(change.nuevo, plan, evidencia, select=is_select, allowed=allowed):
             return _deny(f"field {change.campo!r} would change to a value outside the plan")
     return None
 
@@ -213,10 +278,12 @@ def _describe(
     if evidencia.recorte_evento is not None:
         images.append(evidencia.recorte_evento)
         labels.append(f"image {len(images)}: crop around the control being acted on")
-    for search in evidencia.capturas_busqueda:
+    for search in evidencia.capturas_busqueda[-1:]:
         images.append(search)
-        labels.append(f"image {len(images)}: results of the last search")
-    action_json = accion.model_dump_json(exclude_none=True, exclude={"razon", "postcondicion"})
+        labels.append(f"image {len(images)}: results of the MOST RECENT search or filter")
+    action_json = accion.model_dump_json(
+        exclude_none=True, exclude={"razon", "postcondicion", "memo"}
+    )
     text = (
         f"PLAN: {plan.model_dump_json()}\nACTION: {action_json}\n"
         f"Resolved parameters: {evidencia.parametros}\n"
@@ -260,7 +327,7 @@ async def authorize(
         log.warning("auditor failed", extra={"count": state.auditor_errors, "error": str(exc)})
         final = state.auditor_errors >= 2
         return _deny("the auditor did not answer", final=final)
-    verdict = _postcheck(plan, reply, evidencia, state)
+    verdict = _postcheck(plan, accion, reply, evidencia, state)
     if verdict:
         return verdict
     if reply.decision != "permitir":

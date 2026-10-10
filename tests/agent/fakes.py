@@ -20,6 +20,7 @@ class FakeLlm:
         json_mode: bool = False,
         max_tokens: int | None = None,
         deadline: float | None = None,
+        schema=None,
     ) -> ChatResult:
         self.calls.append(
             {"model": model, "messages": messages, "images": images, "deadline": deadline}
@@ -49,6 +50,8 @@ ROLE_MARKERS = {
     "today": "You read a desktop app screenshot",
     "detector": "You compare two screenshots",
     "reader": "You read one form field",
+    "table": "You transcribe the main data table",
+    "form_reader": "You read several form fields",
     "submit": "You look at a 240x120 crop",
     "auditor": "You are the write auditor",
     "verifier": "You verify the outcome",
@@ -65,6 +68,8 @@ class RoutedLlm:
     def __init__(self, **scripts) -> None:
         self._scripts = {role: scripts[role] for role in scripts}
         self.calls: list[tuple[str, str]] = []  # (role, model)
+        self.image_counts: dict[str, list[int]] = {}
+        self.last_user: dict[str, str] = {}
 
     def count(self, role: str) -> int:
         return sum(1 for r, _ in self.calls if r == role)
@@ -78,10 +83,13 @@ class RoutedLlm:
         json_mode: bool = False,
         max_tokens: int | None = None,
         deadline: float | None = None,
+        schema=None,
     ) -> ChatResult:
         system = messages[0]["content"]
         role = next(r for r, marker in ROLE_MARKERS.items() if system.startswith(marker))
         self.calls.append((role, model))
+        self.image_counts.setdefault(role, []).append(len(images or []))
+        self.last_user[role] = messages[-1]["content"]
         script = self._scripts[role]
         reply = (
             script(messages)

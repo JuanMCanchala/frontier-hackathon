@@ -1,6 +1,5 @@
 """Event classifier: decides whether an event reads or can persist, from a small crop only."""
 
-import asyncio
 import hashlib
 import logging
 from typing import Literal
@@ -103,6 +102,14 @@ def _cache_key(crop: Image.Image, tipo_evento: str) -> str:
     return f"{digest}:{tipo_evento}"
 
 
+def _view_key(screenshot: Image.Image, punto: tuple[int, int], tipo_evento: str) -> str:
+    """Approximate identity of (view, point): the screen shrunk to 32x20 and quantized to 16
+    grey levels, and the point rounded to 8 px, so small repaints of the same view still hit."""
+    small = screenshot.convert("L").resize((32, 20), Image.Resampling.BOX)
+    digest = hashlib.sha256(bytes(v >> 4 for v in small.tobytes())).hexdigest()[:16]
+    return f"view:{digest}:{punto[0] // 8}:{punto[1] // 8}:{tipo_evento}"
+
+
 def apply_mode(clase: Clasificacion, modo: Modo) -> Clasificacion:
     """Verification is read-only: whatever is not navigation or search counts as a commitment."""
     if modo == "verificacion" and clase not in _READ_ONLY:
@@ -127,7 +134,8 @@ async def classify_event(
     crop = crop_around(screenshot, punto)
     marked = mark_point(screenshot, punto)
     key = _cache_key(crop, tipo_evento)
-    cached = cache.get(key) if cache else None
+    view_key = _view_key(screenshot, punto, tipo_evento)
+    cached = (cache.get(key) or cache.get(view_key)) if cache else None
     if cached is not None:
         return apply_mode(cached, modo)
     messages: list[Message] = [
@@ -148,20 +156,22 @@ async def classify_event(
         )
         return reply.clase
 
-    # The model is not stable on the same crop: ask several times in parallel and keep the most
-    # restrictive answer, so disagreement lands on the safe side.
-    outcomes = await asyncio.gather(*(vote() for _ in range(votes)), return_exceptions=True)
-    for outcome in outcomes:
-        if isinstance(outcome, (LlmError, InvalidReply)):
-            log.warning("classifier failed, treating as commitment", extra={"error": str(outcome)})
-            return "compromiso"
-        if isinstance(outcome, BaseException):
-            raise outcome
-    clase = max(outcomes, key=_RESTRICTIVENESS.index)
-    if len(set(outcomes)) > 1:
-        log.warning("classifier votes disagree", extra={"votes": outcomes, "chosen": clase})
+    # The model is not stable on the same crop. A read-only first answer is taken as is; when it
+    # says field or commitment, a second vote runs and the most restrictive answer wins, so
+    # disagreement lands on the safe side.
+    try:
+        votes_cast = [await vote()]
+        if votes > 1 and votes_cast[0] not in _READ_ONLY:
+            votes_cast.append(await vote())
+    except (LlmError, InvalidReply) as exc:
+        log.warning("classifier failed, treating as commitment", extra={"error": str(exc)})
+        return "compromiso"
+    clase = max(votes_cast, key=_RESTRICTIVENESS.index)
+    if len(set(votes_cast)) > 1:
+        log.warning("classifier votes disagree", extra={"votes": votes_cast, "chosen": clase})
     if cache:
         cache.put(key, clase)
+        cache.put(view_key, clase)
     return apply_mode(clase, modo)
 
 

@@ -25,6 +25,7 @@ class ActorContext:
     seconds_left: float = 0.0
     note: str | None = None  # e.g. feedback from the previous step
     parametros: dict[str, str] = field(default_factory=dict)  # plan parameters, resolved by code
+    memo: str | None = None  # the actor's own latest notes
     modo: Literal["ejecucion", "verificacion"] = "ejecucion"
 
 
@@ -47,6 +48,7 @@ Action schema (closed; coordinates are screen pixels, x in 0..1279, y in 0..799)
              "tipo": "texto"|"select"}],  // fill_form; "select" for dropdown fields
  "postcondicion": string,            // optional: what you expect to see after the action
  "razon": string,                    // one short sentence
+ "memo": string,                     // optional, short: what you need to remember next step
  "respuesta": [string],              // done, only for questions: the requested data in order
  "motivo": string, "datos_motivo": [string]}   // fail
 
@@ -82,8 +84,18 @@ Rules:
   name variants, and check every page of results.
 - If more than one candidate entity matches, do not pick one: fail, and in datos_motivo name the
   value that tells them apart (the document number).
-- For questions, finish with done and "respuesta" holding the values in the order asked. Take them
-  from the app's own total, or count rows across all pages. Say which in "razon".
+- For questions, finish with done and "respuesta" holding the values in the order asked. First
+  apply the filters the list offers (status, customer, dates) and look for a total ("Showing
+  1-20 of 45", "Total: 45"). Only if there is no total, count page by page going FORWARD, adding
+  up in "memo" per page (e.g. "p1: 12, p2: 13, total so far 25"), and never go back. Say the
+  source in "razon".
+- If the plan has a "consulta" (count or sum over a list): do NOT count by eye. Set the list up
+  (type the entity in the list's search box if there is one, apply the status filter if there
+  is one), make the first page of the table visible and reply done without "respuesta". The code
+  reads every page and computes the answer.
+- If the question has no possible answer (the entity or datum does not exist), finish with fail
+  and the facts you read; never invent an answer.
+- Your "memo" is shown back to you as "Your notes" on every next step; keep it current.
 - Do only what the plan allows. If the task cannot be done as planned, fail with the facts you
   read (what you searched, what you found) in datos_motivo.
 - Use done only when the task is complete on screen; use wait if the screen is still loading.
@@ -120,6 +132,7 @@ def _format_context(contexto: ActorContext, history_steps: int) -> str:
         f"Plan: {contexto.plan.model_dump_json()}",
         f"App 'Today' (as read): {contexto.hoy_app or 'not read yet'}",
         f"Plan parameters resolved by code (type exactly these): {contexto.parametros or 'none'}",
+        f"Your notes: {contexto.memo or '(none)'}",
         f"Time left: {max(0, round(contexto.seconds_left))} s",
         "Recent actions (oldest first):",
         *(f"{i}. {line}" for i, line in enumerate(history, 1)),
