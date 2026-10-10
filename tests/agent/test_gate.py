@@ -47,10 +47,20 @@ async def test_allowed_update_sends_all_images():
     assert llm.calls[0]["model"] == "aud"
 
 
-async def test_plan_without_writes_denies_without_calling_model():
+async def test_plan_without_writes_denies_a_key_without_calling_model():
     llm = FakeLlm([])
-    verdict = await run(llm, plan=Plan(tipo="preguntar", entidad="Ana"))
+    enter = Action(tipo="key", combo="Enter")
+    verdict = await run(llm, plan=Plan(tipo="preguntar", entidad="Ana"), accion=enter)
     assert verdict.decision == "denegar_corregible" and llm.calls == []
+
+
+async def test_plan_without_writes_lets_through_only_a_click_that_writes_nothing():
+    """The incident theme opens with a notice whose button looks like a commitment."""
+    question = Plan(tipo="preguntar", entidad="Ana")
+    closes = await run(FakeLlm([reply(escritura="ninguna")]), plan=question)
+    assert closes.decision == "permitir"
+    writes = await run(FakeLlm([reply(escritura="update")]), plan=question)
+    assert writes.decision == "denegar_corregible"
 
 
 async def test_write_outside_plan_is_denied_even_if_auditor_allows():
@@ -91,9 +101,16 @@ async def test_resolved_parameter_counts_as_plan_value():
 
 
 async def test_missing_search_is_correctable():
-    llm = FakeLlm([])
+    llm = FakeLlm([reply(escritura="update")])
     verdict = await run(llm, evidencia=ev(search=False))
     assert verdict.decision == "denegar_corregible" and "searched" in verdict.motivo
+
+
+async def test_closing_a_notice_before_searching_is_allowed_in_a_write_task():
+    """The clinic theme opens with "Novedades de la versión 4.2" [Entendido]: no search yet."""
+    llm = FakeLlm([reply(escritura="ninguna")])
+    verdict = await run(llm, evidencia=ev(search=False))
+    assert verdict.decision == "permitir"
 
 
 async def test_diff_only_counts_changed_fields():
@@ -347,7 +364,8 @@ async def test_resolved_date_parameters_configure_filters_in_a_read_only_plan():
 
 
 async def test_a_save_click_in_a_read_only_plan_still_goes_denied():
-    verdict = await run(FakeLlm([]), plan=READ_PLAN, accion=CLICK, evidencia=ev(tarea=READ_TASK))
+    save = FakeLlm([reply(escritura="update")])
+    verdict = await run(save, plan=READ_PLAN, accion=CLICK, evidencia=ev(tarea=READ_TASK))
     assert verdict.decision == "denegar_corregible"
 
 
@@ -363,3 +381,25 @@ async def test_only_the_most_recent_search_is_given_to_the_auditor_as_uniqueness
     assert len(sent) == 2 and sent[1] is recent  # current screen + the latest search only
     system = llm.calls[0]["messages"][0]["content"]
     assert "MOST RECENT" in system and "single exact match" in system
+
+
+CODE_PLAN = Plan(
+    tipo="editar",
+    entidad="PD-0143",
+    escrituras_permitidas=[{"entidad": "Pedido", "accion": "update", "campos": {"fecha": "x"}}],
+)
+
+
+async def test_a_record_code_needs_no_search_and_the_auditor_is_told_why():
+    """Opening PD-0143 straight from the list left no search screenshot, and the auditor denied
+    the edit three times for lack of uniqueness evidence."""
+    llm = FakeLlm([reply()])
+    verdict = await run(llm, plan=CODE_PLAN, evidencia=ev(search=False))
+    assert verdict.decision == "permitir"
+    assert "ENTITY IS A RECORD CODE: 'PD-0143'" in llm.calls[0]["messages"][-1]["content"]
+
+
+async def test_a_name_still_needs_a_search():
+    llm = FakeLlm([reply(escritura="update")])
+    verdict = await run(llm, evidencia=ev(search=False))
+    assert verdict.decision == "denegar_corregible" and "searched" in verdict.motivo
