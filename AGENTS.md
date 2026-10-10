@@ -19,6 +19,16 @@ Contexto y reglas de trabajo para este repo. Léelo completo antes de cada tarea
 - No hardcodees casos del brief ni respuestas esperadas. El set de evaluación es oculto y trae casos nuevos.
 - Nada de secretos en el código ni en los logs. Las keys se leen de variables de entorno.
 
+## Colaboración (rama Bustamante)
+
+Este repo es de JuanMCanchala (`JuanMCanchala/frontier-hackathon`). Colaboramos con permiso de escritura; no somos dueños. Nada entra a `main` por push directo.
+
+- Toda la implementación y todos los commits van en la rama `Bustamante`. Si no existe, créala desde `origin/main`. No trabajes ni hagas commit en `main` ni en otra rama.
+- Cada tarea la ejecuta un solo agente. Ese agente hace solo los commits de su tarea: un cambio, un propósito, sin mezclar tareas ajenas en el mismo commit.
+- Al empezar una tarea, abre un pull request de `Bustamante` hacia `main` y recién entonces sigue con el trabajo. Si la rama todavía no diverge de `main`, el primer commit de la tarea es el que permite abrir el PR; ábrelo en ese momento, antes de continuar. Si ya hay un PR abierto de esa rama, los commits de la tarea entran ahí; no abras otro.
+- El PR lo crea este agente desde este entorno con `gh`, autenticado como `Juan-GuevaraBusta`. No instales un MCP de GitHub si `gh` ya tiene scope `repo` y permiso de escritura.
+- No mergees el PR ni pushees a `main` salvo que te lo pidan. Si el push o el PR fallan por permisos, para y dilo; no cambies de rama para rodear el fallo.
+
 ## Estándar de código
 
 - Código, identificadores y comentarios en inglés. Documentación del repo (README, diseño, spec, log) en español.
@@ -50,4 +60,4 @@ Consecuencias: <qué se vuelve más fácil / más difícil>
 
 - Commits pequeños y atómicos, en español, en imperativo y con prefijo convencional: `feat:`, `fix:`, `test:`, `docs:`, `refactor:`, `chore:`.
 - El mensaje explica el porqué cuando no es obvio. Sin firmas, sin trailers y sin texto generado de relleno.
-- No hagas commit ni push sin que te lo pida.
+- Cada commit de una tarea va en `Bustamante`, hecho por el agente de esa tarea. Commit y push a esa rama, y el PR hacia `main`, forman parte de ejecutar la tarea. No mergees ni pushees a `main` sin que te lo pidan.

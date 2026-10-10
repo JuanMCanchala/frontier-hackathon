@@ -1,3 +1,9 @@
+## 2026-10-10 13:06 — Rama Bustamante y un PR hacia main
+Contexto: el repo es de JuanMCanchala y colaboramos con permiso de escritura. Hacía falta un carril fijo para los commits de Bustamante y un PR revisable, sin pushear a `main`.
+Decisión: todo el trabajo de este agente va en la rama `Bustamante`. Cada tarea la ejecuta un solo agente y sus commits son solo de esa tarea. Al empezar, se abre (o se reutiliza) un PR de `Bustamante` a `main` con `gh` como `Juan-GuevaraBusta`. No se mergea ni se pushea a `main` salvo pedido explícito.
+Descartado: GitHub MCP — `gh` ya está autenticado con scope `repo` y permiso WRITE; no añade capacidad en esta sesión. Una rama distinta por tarea — el nombre pedido es `Bustamante`.
+Consecuencias: mientras el PR siga abierto, las tareas siguientes suman commits ahí; no se puede paralelizar otra rama con el mismo nombre. El historial de cada tarea queda en los commits del agente que la hizo.
+
 ## 2026-10-10 — Driver RFB propio sobre websocket
 Contexto: el escritorio de pruebas solo expone VNC por websocket (subprotocolo binary). Necesitamos capturas fiables, clics con duración controlada y espera de estabilidad de pantalla.
 Decisión: cliente RFB 3.8 propio y async en `src/aprendiz/vnc/` (auth VNC con DES, raw + DesktopSize, framebuffer en memoria con PIL, tarea lectora en segundo plano). Los tiempos (mantener el clic 150 ms, ventana de quietud 500 ms, timeout 3 s) viven en `config.py`.
