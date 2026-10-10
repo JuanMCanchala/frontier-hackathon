@@ -20,7 +20,6 @@ flowchart LR
         DRV["Driver RFB propio<br/>clic 150 ms · estabilidad ≤ 1.5 s"]
         DB[("SQLite en volumen<br/>estado de tareas · memoria por app")]
         TRZ[("Trazas por tarea")]
-        EXP["Exportador de trazas<br/>Langfuse auto-hospedado · opcional<br/>no autoriza acciones"]
     end
 
     subgraph LLM["OpenRouter (externo)"]
@@ -39,14 +38,13 @@ flowchart LR
     ORQ <-->|"texto, capturas y recortes<br/>nunca la contraseña"| MOD
     ORQ --- DB
     ORQ -.- TRZ
-    TRZ -.->|"traza ya redactada<br/>un fallo no corta la tarea"| EXP
 
     classDef untrusted fill:#fde2e2,stroke:#c0392b,color:#000
     classDef external fill:#fff4d6,stroke:#b9770e,color:#000
     classDef ours fill:#e3f1e3,stroke:#2e7d32,color:#000
     class APP untrusted
     class MOD external
-    class API,ORQ,WD,DRV,DB,TRZ,EXP ours
+    class API,ORQ,WD,DRV,DB,TRZ ours
 ```
 
 ### 1b. Componentes del ciclo de la tarea
@@ -92,7 +90,6 @@ Qué marca cada límite:
 | Cliente → servicio | Tarea y credenciales del escritorio | Bearer token en `POST /tasks` y `GET /tasks/{id}`; `/health` no lo exige y lo acepta si viene. La contraseña del escritorio solo se usa en la autenticación VNC dentro del driver. |
 | Servicio → proveedores LLM | Texto de la tarea, capturas, recortes, plan | La contraseña y los tokens no se envían. Las capturas sí pueden mostrar datos sensibles del negocio. Timeout y reintentos acotados en el módulo cliente. |
 | Servicio ↔ escritorio | Entradas de teclado y ratón; framebuffer | Todo lo que vuelve es píxeles no confiables. Ninguna escritura se autoriza por lo que la pantalla diga. |
-| Servicio → exportador de trazas | Traza local ya redactada y puntuaciones del harness | Langfuse auto-hospedado en la misma zona. Timeout y reintentos acotados. Si falta configuración o falla, la tarea sigue. No salen la contraseña ni los tokens. No autoriza acciones. |
 
 ## 2. Secuencia de una tarea
 
