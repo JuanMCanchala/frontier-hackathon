@@ -418,3 +418,30 @@ def test_a_resolved_date_may_be_typed_in_the_format_the_app_uses():
     allowed = allowed_values(plan, {"d": "09/03/2026"})
     assert {"09/03/2026", "2026-03-09"} <= allowed
     assert "2026-03-10" not in allowed
+
+
+async def test_an_option_shown_with_a_code_after_the_plan_value_is_not_outside_the_plan():
+    """The clinic shows "Dr. Germán Acosta (MD-002)"; the export was denied twice for it."""
+    plan = Plan(
+        tipo="exportar",
+        escrituras_permitidas=[
+            {"entidad": "Reporte", "accion": "export", "campos": {"medico": "Dr. Germán Acosta"}}
+        ],
+    )
+    shown = reply(
+        escritura="export",
+        cambios=[{"campo": "Médico", "inicial": None, "nuevo": "Dr. Germán Acosta (MD-002)"}],
+    )
+    assert (await run(FakeLlm([shown]), plan=plan)).decision == "permitir"
+    other = reply(
+        escritura="export",
+        cambios=[{"campo": "Médico", "inicial": None, "nuevo": "Dra. Lucía Peña (MD-007)"}],
+    )
+    assert (await run(FakeLlm([other]), plan=plan)).decision == "denegar_corregible"
+
+
+def test_iso_date():
+    from aprendiz.agent.fields import iso_date
+
+    assert iso_date("09/03/2026") == "2026-03-09"
+    assert iso_date("2026-03-09") is None and iso_date("Pereira") is None
