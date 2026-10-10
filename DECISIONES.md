@@ -1,3 +1,33 @@
+## 2026-10-10 13:40 — A main por PR desde Bustamante
+Contexto: el push directo a `main` lo rechaza GitHub (GH006): la rama está protegida y exige el check `ci`, que solo corre en un PR.
+Decisión: todo termina en `main`, pero entra por la rama `Bustamante` y un PR hacia `main` que se mergea cuando `ci` pasa. Reemplaza la decisión de commits directos a `main` de las 13:19.
+Descartado: pedir al dueño que quite la exigencia de `ci` — no depende de nosotros y quita una red de seguridad. Saltar la protección con admin — prohibido sin aprobación explícita.
+Consecuencias: `ci` valida cada integración; entre el push y el merge hay una espera. `Bustamante` debe mantenerse al día con `main` para que el PR no choque.
+
+## 2026-10-10 13:19 — Commits directos a main
+Contexto: la rama `Bustamante` la empujaba más de una persona y cada push dejaba de ser fast-forward.
+Decisión: todos los commits van a `main`, con `git pull --ff-only` antes y push fast-forward después. No se abre rama ni PR por tarea. Sigue prohibido el push o merge forzado sin aprobación previa y una indicación explícita después.
+Descartado: seguir en `Bustamante` — era la fuente del conflicto. Una rama nueva por tarea con PR — vuelve a separar la historia y retrasa la integración.
+Consecuencias: `main` recibe el trabajo al momento; dos pushes simultáneos se integran con merge, no con force. El PR de `Bustamante` no debe mergearse: reintroduciría la regla vieja.
+
+## 2026-10-10 13:16 — Langfuse al cerrar las trazas locales, no en el núcleo
+Contexto: hace falta agrupar trazas y puntuaciones para comparar corridas, sin retrasar el planificador ni sacar capturas del volumen.
+Decisión: un solo exportador, Langfuse auto-hospedado, como componente más. Entra al cerrar el hito de las 14:00 y antes del A/B de las 15:00; si los controles no cumplieron, se mueve a las 17:00–17:45 y no retrasa el A/B. Reenvía la traza local ya redactada. Módulo cliente propio, configuración en un solo sitio, timeout y reintentos acotados. Si falta configuración o falla, la tarea sigue y manda el archivo local. No autoriza acciones.
+Descartado: LangSmith y Langfuse juntos — se pisan. LangSmith — el stack no es LangChain y su nube sacaría capturas. Meterlo en el hito de las 13:15 — aún no hay traza que exportar y retrasa el planificador.
+Consecuencias: el A/B puede comparar corridas fuera del volumen solo si el exportador cupo a las 14:45. Hasta entonces la fuente de verdad sigue siendo la traza local.
+
+## 2026-10-10 13:12 — Sin push ni merge forzado
+Contexto: un push o merge forzado puede reescribir historia compartida o saltarse las reglas del repo ajeno.
+Decisión: prohibido `--force`, `--force-with-lease`, `push -f` y cualquier merge forzado o de admin. Solo procede si Bustamante aprueba primero y, después, da la indicación explícita.
+Descartado: permitirlo con un solo "haz force push" — no distingue un pedido apresurado de una aprobación consciente.
+Consecuencias: la historia publicada de `Bustamante` no se reescribe; un conflicto se resuelve con merge o rebase local no publicado, o se para y se pregunta.
+
+## 2026-10-10 13:06 — Rama Bustamante y un PR hacia main
+Contexto: el repo es de JuanMCanchala y colaboramos con permiso de escritura. Hacía falta un carril fijo para los commits de Bustamante y un PR revisable, sin pushear a `main`.
+Decisión: todo el trabajo de este agente va en la rama `Bustamante`. Cada tarea la ejecuta un solo agente y sus commits son solo de esa tarea. Al empezar, se abre (o se reutiliza) un PR de `Bustamante` a `main` con `gh` como `Juan-GuevaraBusta`. No se mergea ni se pushea a `main` salvo pedido explícito.
+Descartado: GitHub MCP — `gh` ya está autenticado con scope `repo` y permiso WRITE; no añade capacidad en esta sesión. Una rama distinta por tarea — el nombre pedido es `Bustamante`.
+Consecuencias: mientras el PR siga abierto, las tareas siguientes suman commits ahí; no se puede paralelizar otra rama con el mismo nombre. El historial de cada tarea queda en los commits del agente que la hizo.
+
 ## 2026-10-10 — Driver RFB propio sobre websocket
 Contexto: el escritorio de pruebas solo expone VNC por websocket (subprotocolo binary). Necesitamos capturas fiables, clics con duración controlada y espera de estabilidad de pantalla.
 Decisión: cliente RFB 3.8 propio y async en `src/aprendiz/vnc/` (auth VNC con DES, raw + DesktopSize, framebuffer en memoria con PIL, tarea lectora en segundo plano). Los tiempos (mantener el clic 150 ms, ventana de quietud 500 ms, timeout 3 s) viven en `config.py`.

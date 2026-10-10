@@ -19,6 +19,18 @@ Contexto y reglas de trabajo para este repo. Léelo completo antes de cada tarea
 - No hardcodees casos del brief ni respuestas esperadas. El set de evaluación es oculto y trae casos nuevos.
 - Nada de secretos en el código ni en los logs. Las keys se leen de variables de entorno.
 
+## Colaboración
+
+Este repo es de JuanMCanchala (`JuanMCanchala/frontier-hackathon`). Colaboramos con permiso de escritura; no somos dueños.
+
+- Todo el trabajo termina en `main`. `main` está protegido y exige el check `ci`, así que no acepta push directo: el camino es la rama `Bustamante` y un pull request hacia `main`.
+- Antes de editar, `git fetch origin` y trabaja en `Bustamante` al día con `origin/main` y `origin/Bustamante`. Si `Bustamante` está atrasada respecto a `main`, haz merge de `origin/main` en ella; no reescribas historia publicada. Si el conflicto no se resuelve con lo que dicen los dos lados, para y pregunta.
+- Si `main` está atrasado respecto a `Bustamante` (`git log origin/main..origin/Bustamante` muestra commits), intégralo en `main` si es sano: sin conflictos que no se resuelvan con lo que dicen los dos lados, y con `uv run pytest -q` y `uv run ruff check src tests eval` en verde. Si no es sano, no lo integres: para y pregunta con la salida exacta.
+- Push a `origin/Bustamante`, siempre fast-forward. Si hay un PR abierto de `Bustamante` hacia `main`, los commits entran ahí; si no, ábrelo con `gh`. Cuando `ci` pase, mergea el PR a `main` sin saltar reglas.
+- Cada tarea la ejecuta un solo agente. Ese agente hace solo los commits de su tarea: un cambio, un propósito, sin mezclar tareas ajenas en el mismo commit.
+- Si el push o el merge del PR fallan, vuelve a integrar y reintenta. Si fallan por permisos o por `ci` en rojo, para y dilo con la salida exacta; no uses otra rama para rodear el fallo.
+- Nunca hagas push forzado ni merge forzado (`--force`, `--force-with-lease`, `push -f`, merge con admin o saltando reglas). Solo si yo apruebo primero y, después de esa aprobación, te doy la indicación explícita. Sin las dos, ni lo intentes.
+
 ## Estándar de código
 
 - Código, identificadores y comentarios en inglés. Documentación del repo (README, diseño, spec, log) en español.
@@ -50,4 +62,5 @@ Consecuencias: <qué se vuelve más fácil / más difícil>
 
 - Commits pequeños y atómicos, en español, en imperativo y con prefijo convencional: `feat:`, `fix:`, `test:`, `docs:`, `refactor:`, `chore:`.
 - El mensaje explica el porqué cuando no es obvio. Sin firmas, sin trailers y sin texto generado de relleno.
-- No hagas commit ni push sin que te lo pida.
+- Cada commit de una tarea lo hace el agente de esa tarea. Commit, push fast-forward a `origin/Bustamante` y merge del PR a `main` con `ci` en verde forman parte de ejecutar la tarea. No reescribas historia publicada.
+- Push forzado y merge forzado están prohibidos salvo aprobación mía seguida de una indicación explícita.
