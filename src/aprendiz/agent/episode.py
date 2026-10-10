@@ -130,6 +130,17 @@ def describe(action: Action) -> str:
 
 
 class Episode:
+    """One task's step loop. AgentRunner builds it after the plan is frozen.
+
+    ``run_execution`` repeats a step until the actor returns done or fail.
+    A step is ``_step`` → ``_decide`` → ``_process`` → ``_dispatch``.
+    ``_dispatch`` is the only path that reaches the driver: it classifies,
+    may wait for the gate, emits, then ``_after`` runs the effect detector.
+    ``run_verification`` is the same loop in read-only mode, so the verifier
+    can see the target fields. A count or sum leaves through
+    ``_answer_from_table``, which tallies in code.
+    """
+
     def __init__(
         self,
         *,
@@ -742,6 +753,10 @@ class Episode:
         rec: dict,
         by_continuity: bool = False,
     ) -> None:
+        """The only emit path. A commitment or a record-field edit is authorized
+        before the driver sees it; verification mode denies those instead of
+        emitting them, because a read-only pass must not persist anything.
+        """
         edits_record = clase == "campo_registro" and action.tipo in ("type", "key")
         needs_gate = clase == "compromiso" or edits_record
         verdict: Verdict | None = None

@@ -109,16 +109,33 @@ El estado (SQLite y trazas) vive en `/app/data`, montado como volumen. El proces
 
 ```text
 src/aprendiz/
-  api.py       contrato HTTP
-  tasks.py     supervisor: lock por escritorio, corte duro, orden de cierre
-  store.py     estado de tareas en SQLite
-  redact.py    filtro de secretos del resumen
-  vnc/         driver RFB propio sobre websocket
+  api.py              contrato HTTP
+  config.py           entorno y tiempos del driver
+  models.py           esquemas del contrato y del resultado de una tarea
+  runner.py           interfaz que llama el supervisor; no conoce al agente
+  tasks.py            supervisor: lock por escritorio, corte duro, orden de cierre
+  store.py            estado de tareas en SQLite
+  redact.py           filtro de secretos del resumen
+  vnc/                driver RFB propio sobre websocket
+  agent/
+    runner.py         ciclo: conectar, plan, episodio, verificar, resumir
+    planner.py        plan congelado solo con el texto, antes de la primera captura
+    episode.py        bucle de un paso: captura, clasifica, autoriza, ejecuta, detecta
+    actor.py          adaptador de visión: una captura entra, una acción sale
+    classifier.py     recorte pequeño: si el evento lee o puede persistir
+    gate.py           compuerta: autoriza cada escritura contra el plan congelado
+    detector.py       segunda línea: busca señales de que algo persistió
+    verifier.py       contrasta el estado final con el plan
+    summary.py        resumen determinista a partir de datos estructurados
+    textrule.py       solo se teclea texto de la tarea, del plan o del código
+    hoy.py            "Hoy" de la app: el modelo lee el texto y el código calcula
+    table_reader.py   conteo y suma: el código agrega las páginas, no el actor
+    llm.py            cliente de modelos: timeout, reintentos y reserva de costo
 eval/
-  harness.py   corrida de pruebas contra un escritorio
-  scoring.py   reglas de calificación
-  pruebas/     pruebas propias
-tests/         tests offline (servidor RFB falso, runners falsos)
-apps/mini_crud/ mini app CRUD local (VNC, fuera del wheel)
-docs/          diseño y diagramas
+  harness.py          corrida de pruebas contra un escritorio
+  scoring.py          reglas de calificación
+  pruebas/            pruebas propias
+tests/                tests offline (servidor RFB falso, runners falsos)
+apps/mini_crud/       mini app CRUD local (VNC, fuera del wheel)
+docs/                 diseño y diagramas
 ```
