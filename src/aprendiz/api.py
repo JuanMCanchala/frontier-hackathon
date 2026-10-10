@@ -10,9 +10,10 @@ import uvicorn
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
+from aprendiz.agent.runner import AgentRunner
 from aprendiz.config import Settings
 from aprendiz.models import TaskCreated, TaskRequest, TaskStatus
-from aprendiz.runner import NotImplementedRunner, Runner
+from aprendiz.runner import Runner
 from aprendiz.tasks import TaskManager
 
 _bearer = HTTPBearer(auto_error=False)
@@ -36,7 +37,9 @@ def create_app(settings: Settings | None = None, runner: Runner | None = None) -
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         app.state.settings = settings or Settings()
-        app.state.manager = TaskManager(app.state.settings, runner or NotImplementedRunner())
+        app.state.manager = TaskManager(
+            app.state.settings, runner or AgentRunner(app.state.settings)
+        )
         yield
         await app.state.manager.shutdown()
 
