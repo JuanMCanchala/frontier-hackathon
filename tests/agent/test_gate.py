@@ -403,3 +403,18 @@ async def test_a_name_still_needs_a_search():
     llm = FakeLlm([reply(escritura="update")])
     verdict = await run(llm, evidencia=ev(search=False))
     assert verdict.decision == "denegar_corregible" and "searched" in verdict.motivo
+
+
+def test_a_resolved_date_may_be_typed_in_the_format_the_app_uses():
+    from aprendiz.agent.gate import allowed_values
+
+    plan = Plan(
+        tipo="exportar",
+        escrituras_permitidas=[
+            {"entidad": "Reporte", "accion": "export", "campos": {"desde": "d"}}
+        ],
+        parametros={"d": "semana_pasada_inicio"},
+    )
+    allowed = allowed_values(plan, {"d": "09/03/2026"})
+    assert {"09/03/2026", "2026-03-09"} <= allowed
+    assert "2026-03-10" not in allowed

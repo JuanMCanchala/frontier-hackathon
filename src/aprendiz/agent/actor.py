@@ -87,8 +87,12 @@ Rules:
   click, never another hover on the same point.
 - Before exporting a filtered report, leave free-text search boxes empty unless the task asks for
   that text: they count as an extra filter of the export.
-- Buttons that change data (save, delete, a per-row "Revert", "Export") are writes, and an export
-  click has no confirmation dialog: that click is the export. Click them only if the plan allows.
+- Buttons that change data (save, delete, a per-row "Revert", "Export") are writes. Click them
+  only if the plan allows. An export may run on the click or after one confirmation dialog:
+  confirm it once and never export twice.
+- Type filter values in the format the app itself shows (if its dates read 2026-03-09, type that,
+  not 09/03/2026). If after applying the filters the list is empty, check that each filter shows
+  the intended value; if it is still empty, do not export: fail with the filters you applied.
   A generated-reports screen, if the app has one, shows the filters used; use it to confirm an
   export instead of exporting again.
 - Look at the current screenshot before every click; do not reuse coordinates from earlier steps.

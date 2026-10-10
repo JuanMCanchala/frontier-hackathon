@@ -132,7 +132,20 @@ def allowed_values(plan: Plan, parametros: dict[str, str]) -> set[str]:
                 values.add(_norm(raw))
     # Parameters are computed by code from the task and the app's date, never by a model.
     values.update(_norm(v) for v in parametros.values())
+    # The same date in the other formats an app may expect (2026-03-09 for 09/03/2026).
+    values.update(_norm(alt) for v in list(values) for alt in _date_variants(v))
     return values
+
+
+_DMY = re.compile(r"(\d{2})/(\d{2})/(\d{4})")
+
+
+def _date_variants(value: str) -> list[str]:
+    m = _DMY.fullmatch(value.strip())
+    if not m:
+        return []
+    d, mth, y = m.groups()
+    return [f"{y}-{mth}-{d}", f"{d}-{mth}-{y}", f"{y}/{mth}/{d}"]
 
 
 def value_allowed(
