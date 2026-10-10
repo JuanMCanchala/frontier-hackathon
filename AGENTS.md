@@ -25,6 +25,8 @@ Este repo es de JuanMCanchala (`JuanMCanchala/frontier-hackathon`). Colaboramos 
 
 - Todos los commits van a `main`. No abras rama ni pull request por tarea: compartir una rama aparte fue lo que generó conflictos.
 - Antes de editar, `git pull --ff-only origin main`. Si no puede avanzar en fast-forward, integra con merge y no reescribas historia publicada. Si el conflicto no se resuelve con lo que dicen los dos lados, para y pregunta.
+- Todos los pushes van a `origin/main`. Nunca hagas push a otra rama.
+- Si `main` está atrasado respecto a la rama `Bustamante` (`git fetch origin` y `git log main..origin/Bustamante` muestra commits), haz merge de `origin/Bustamante` en `main` solo si es sano: sin conflictos que no se resuelvan con lo que dicen los dos lados, y con `uv run pytest -q` y `uv run ruff check src tests eval` en verde después del merge. Si no es sano, no lo integres: para y pregunta con la salida exacta.
 - Cada tarea la ejecuta un solo agente. Ese agente hace solo los commits de su tarea: un cambio, un propósito, sin mezclar tareas ajenas en el mismo commit.
 - El push a `origin/main` es siempre fast-forward. Si lo rechazan, vuelve a integrar y reintenta. No cambies de rama para rodear el fallo.
 - Nunca hagas push forzado ni merge forzado (`--force`, `--force-with-lease`, `push -f`, merge con admin o saltando reglas). Solo si yo apruebo primero y, después de esa aprobación, te doy la indicación explícita. Sin las dos, ni lo intentes.
