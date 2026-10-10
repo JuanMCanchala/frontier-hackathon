@@ -261,16 +261,6 @@ class AgentRunner:
             return Finish.failed(
                 fin, "el actor declaró terminar sin que se autorizara ninguna escritura"
             )
-        if episode.table_result is not None:
-            if not claimed:
-                return Finish.failed(fin, "el conteo tabular no produjo una respuesta")
-            return Finish(
-                "terminada",
-                fin,
-                respuesta=claimed,
-                fuente=episode.memo,
-                verificado=True,
-            )
         if time.monotonic() >= ctx.deadline - self._agent.VERIFY_RESERVE_S:
             return Finish.failed(fin, "no quedó tiempo para verificar el resultado")
         finales = await episode.run_verification() if navigate else episode.static_evidence()
