@@ -283,6 +283,15 @@ def _precheck(
         # nothing by itself; an autosave would still be caught by the effect detector. Without
         # this, a search box misread as a record field blocks searches and question filters.
         return Verdict(decision="permitir", motivo="typing a fragment of the task persists nothing")
+    if writes and all(w.accion == "export" for w in writes):
+        # Filling an export's filters persists nothing: the export click is the write, and the
+        # auditor checks there that the filters on screen match the plan. Without this the
+        # filters of a report ("Estado: Entregado") were denied as values outside the plan.
+        if _is_filter_configuration(accion, evidencia):
+            return Verdict(
+                decision="permitir",
+                motivo="setting an export's filters with values from the task persists nothing",
+            )
     if not writes:
         if _is_filter_configuration(accion, evidencia):
             return Verdict(
