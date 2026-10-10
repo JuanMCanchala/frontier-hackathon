@@ -2,6 +2,9 @@
 
 import json
 import logging
+import os
+import subprocess
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
@@ -42,7 +45,7 @@ class _Handler(BaseHTTPRequestHandler):
             return
 
         if parsed.path == "/reiniciar":
-            _STORE.reset()
+            _reiniciar_y_recargar()
             self._send_json(200, {"ok": True})
             return
         if parsed.path == "/registros":
@@ -103,6 +106,29 @@ def _record_dict(record: object) -> dict[str, str]:
     if not isinstance(record, Record):
         raise TypeError("expected Record")
     return {"id": record.id, "name": record.name, "bench": record.bench, "note": record.note}
+
+
+def _reiniciar_y_recargar() -> None:
+    """Close any open native dialogs, reset the store, and reload the browser.
+
+    Strategy: Escape closes prompt()/confirm()/alert() on Chromium.  A brief
+    pause lets any accidental POST from ``prompt() || ""`` land so the store
+    reset that follows wipes those side effects.  Ctrl+r then reloads the
+    kiosk page so the next test starts with a clean DOM.
+    """
+    display = os.environ.get("DISPLAY", ":1")
+    env = {"DISPLAY": display}
+
+    # 1. Close any native dialog still open from the previous task.
+    subprocess.run(["xdotool", "key", "Escape"], env=env, timeout=5)
+    # 2. Wait for any in-flight POST triggered by the prompt closing.
+    time.sleep(0.3)
+    # 3. Wipe the store (undoes any partial record from step 1).
+    _STORE.reset()
+    # 4. Reload the browser page.
+    subprocess.run(["xdotool", "key", "ctrl+r"], env=env, timeout=5)
+    # 5. Let the page render settle before the harness takes the before snapshot.
+    time.sleep(2.0)
 
 
 def main() -> None:

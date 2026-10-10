@@ -8,6 +8,18 @@ Consecuencias: las corridas se comparan en Langfuse sin tocar el servicio evalua
 Contexto: la evaluación puede usar una app distinta y hace falta medir generalización, autoguardado y edición en celda, que la app de práctica no ofrece.
 Decisión: mini app propia en `apps/mini_crud/`, servida por HTTP dentro del contenedor y expuesta por Xvfb, Chromium en kiosko, x11vnc y websockify en el puerto 6080 con ruta `/websockify`. Reset local por API (`POST /reiniciar`), sin endpoints `/__check` ni `/__reset` del evento.
 Descartado: reutilizar la app de práctica con otros datos — mismo layout, no mide generalización. Implementar un servidor RFB propio — el driver ya habla VNC estándar. TigerVNC/Xvnc como sustituto de Xvfb — cambia el stack de pantalla en lugar de engancharse al display virtual.
+
+## 2026-10-10 18:00 — Reinicio fiable de la mini app tras /reiniciar
+Contexto: `POST /reiniciar` resetea `Store` pero Chromium en kiosko no se recarga. Si un `prompt()` nativo quedó abierto de la tarea anterior (M1 dejó el diálogo «Nota» abierto), la siguiente tarea arranca con la pantalla sucia. M2 arrancó con el prompt de M1, y M3 vio el DOM viejo de M2 con «Se guardó el cambio». Como `prompt()` bloquea el JS de la página, un polling desde JS no basta.
+Decisión: instalar `xdotool` en el contenedor. En `/reiniciar`:
+1. Enviar `Escape` por X11 (`DISPLAY=:1`) para cerrar cualquier diálogo nativo abierto.
+2. Esperar 300 ms para que cualquier `POST /registros` disparado por el cierre del prompt (p.ej. `prompt() || ""`) se complete.
+3. Resetear el `Store` (borra registros parciales que el paso 1 haya podido crear).
+4. Enviar `ctrl+r` por X11 para recargar Chromium.
+5. Esperar 2 s de asentamiento.
+6. Responder `{"ok": true}`.
+Descartado: reemplazar `prompt()/confirm()/alert()` nativos por diálogos HTML — simplifica la app y cambia la interacción que el agente debe manejar. Polling de época desde JS — no funciona mientras un `prompt()` bloquea el hilo. Usar `xvfb-run` o `XTest` — más complejo que `xdotool`.
+Consecuencias: la mini app conserva los diálogos nativos y el reto realista. El harness ya espera `reset_settle_s` (2 s) tras `/reiniciar`. El contenedor necesita reconstruirse con `xdotool`. Las pruebas offline mockean `subprocess.run`.
 Consecuencias: el humo `eval/smoke_driver.py` puede correr contra `ws://127.0.0.1:6080/websockify`; esa imagen no es el escritorio del evento ni comparte despliegue con el servicio del agente en Railway.
 
 ## 2026-10-10 13:40 — A main por PR desde Bustamante

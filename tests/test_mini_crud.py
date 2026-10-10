@@ -1,11 +1,13 @@
 import sys
 from pathlib import Path
+from unittest import mock
 
 _APPS = Path(__file__).resolve().parents[1] / "apps"
 if str(_APPS) not in sys.path:
     sys.path.insert(0, str(_APPS))
 
 from mini_crud.page import render  # noqa: E402
+from mini_crud.server import _STORE, _reiniciar_y_recargar  # noqa: E402
 from mini_crud.store import SEED_RECORDS, Store  # noqa: E402
 
 FORBIDDEN_WORDS = ("cliente", "factura", "pedido")
@@ -75,3 +77,59 @@ def test_page_has_no_practice_app_words():
     html = render(Store()).lower()
     for word in FORBIDDEN_WORDS:
         assert word not in html
+
+
+# ---- /reiniciar with xdotool ------------------------------------------------
+
+
+def test_reiniciar_resets_store_and_calls_xdotool():
+    # Seed the store with some modifications
+    _STORE.reset()
+    _STORE.create("Extra", "Mesa 7", "nota extra")
+    assert len(_STORE.all()) == 5
+
+    with mock.patch("mini_crud.server.subprocess.run") as fake_run:
+        with mock.patch("mini_crud.server.time.sleep") as fake_sleep:
+            _reiniciar_y_recargar()
+
+    # Store must be back to seed
+    records = _STORE.all()
+    assert records == SEED_RECORDS
+
+    # xdotool called for Escape + ctrl+r
+    assert fake_run.call_count == 2
+    assert fake_run.call_args_list[0] == mock.call(
+        ["xdotool", "key", "Escape"], env={"DISPLAY": ":1"}, timeout=5
+    )
+    assert fake_run.call_args_list[1] == mock.call(
+        ["xdotool", "key", "ctrl+r"], env={"DISPLAY": ":1"}, timeout=5
+    )
+    # sleep called for settle delays
+    assert fake_sleep.call_count == 2
+    assert fake_sleep.call_args_list[0] == mock.call(0.3)
+    assert fake_sleep.call_args_list[1] == mock.call(2.0)
+
+
+def test_reiniciar_obeys_display_env():
+    _STORE.reset()
+    with mock.patch("mini_crud.server.subprocess.run") as fake_run:
+        with mock.patch("mini_crud.server.os.environ.get", return_value=":99"):
+            with mock.patch("mini_crud.server.time.sleep"):
+                _reiniciar_y_recargar()
+
+    assert fake_run.call_args_list[0] == mock.call(
+        ["xdotool", "key", "Escape"], env={"DISPLAY": ":99"}, timeout=5
+    )
+
+
+def test_reiniciar_cleans_partial_record_from_prompt_close():
+    _STORE.reset()
+    # Simulate a partial create triggered by a prompt close before reset
+    _STORE.create("Basura", "x", "y")
+    assert len(_STORE.all()) == 5
+
+    with mock.patch("mini_crud.server.subprocess.run"):
+        with mock.patch("mini_crud.server.time.sleep"):
+            _reiniciar_y_recargar()
+
+    assert _STORE.all() == SEED_RECORDS

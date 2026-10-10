@@ -9,6 +9,7 @@ RUN apt-get update \
         python3 \
         websockify \
         x11vnc \
+        xdotool \
         xvfb \
     && rm -rf /var/lib/apt/lists/*
 
