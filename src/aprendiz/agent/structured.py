@@ -9,10 +9,12 @@ from aprendiz.agent.schemas import parse_model
 
 log = logging.getLogger(__name__)
 
+REASK_PREFIX = "Invalid: "  # starts the follow-up message of a re-ask; the trace counts these
+
 # Reasoning models spend hidden tokens before answering: with a tight cap they stop on
 # "length" and return no content at all (seen with haiku-5.5 at max_tokens=40). Only the
 # tokens actually produced are billed, so a generous floor costs nothing extra.
-MIN_STRUCTURED_TOKENS = 1024
+MIN_STRUCTURED_TOKENS = 2048
 
 
 class InvalidReply(Exception):
@@ -38,6 +40,7 @@ async def ask_json[M: BaseModel](
             json_mode=True,
             max_tokens=max(max_tokens, MIN_STRUCTURED_TOKENS),
             deadline=deadline,
+            schema=schema,
         )
         try:
             return parse_model(schema, result.text)
@@ -50,6 +53,9 @@ async def ask_json[M: BaseModel](
             messages = [
                 *messages,
                 {"role": "assistant", "content": result.text},
-                {"role": "user", "content": f"Invalid: {last_error}\nReply with only valid JSON."},
+                {
+                    "role": "user",
+                    "content": f"{REASK_PREFIX}{last_error}\nReply with only valid JSON.",
+                },
             ]
     raise InvalidReply(f"invalid {schema.__name__} twice: {last_error}")
