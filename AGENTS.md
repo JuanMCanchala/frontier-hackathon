@@ -28,6 +28,7 @@ Este repo es de JuanMCanchala (`JuanMCanchala/frontier-hackathon`). Colaboramos 
 - Al empezar una tarea, abre un pull request de `Bustamante` hacia `main` y recién entonces sigue con el trabajo. Si la rama todavía no diverge de `main`, el primer commit de la tarea es el que permite abrir el PR; ábrelo en ese momento, antes de continuar. Si ya hay un PR abierto de esa rama, los commits de la tarea entran ahí; no abras otro.
 - El PR lo crea este agente desde este entorno con `gh`, autenticado como `Juan-GuevaraBusta`. No instales un MCP de GitHub si `gh` ya tiene scope `repo` y permiso de escritura.
 - No mergees el PR ni pushees a `main` salvo que te lo pidan. Si el push o el PR fallan por permisos, para y dilo; no cambies de rama para rodear el fallo.
+- Nunca hagas push forzado ni merge forzado (`--force`, `--force-with-lease`, `push -f`, merge con admin o saltando reglas). Solo si yo apruebo primero y, después de esa aprobación, te doy la indicación explícita. Sin las dos, ni lo intentes.
 
 ## Estándar de código
 
@@ -60,4 +61,5 @@ Consecuencias: <qué se vuelve más fácil / más difícil>
 
 - Commits pequeños y atómicos, en español, en imperativo y con prefijo convencional: `feat:`, `fix:`, `test:`, `docs:`, `refactor:`, `chore:`.
 - El mensaje explica el porqué cuando no es obvio. Sin firmas, sin trailers y sin texto generado de relleno.
-- Cada commit de una tarea va en `Bustamante`, hecho por el agente de esa tarea. Commit y push a esa rama, y el PR hacia `main`, forman parte de ejecutar la tarea. No mergees ni pushees a `main` sin que te lo pidan.
+- Cada commit de una tarea va en `Bustamante`, hecho por el agente de esa tarea. Commit y push a esa rama, y el PR hacia `main`, forman parte de ejecutar la tarea. El push es siempre fast-forward; no reescribas historia publicada. No mergees ni pushees a `main` sin que te lo pidan.
+- Push forzado y merge forzado están prohibidos salvo aprobación mía seguida de una indicación explícita.

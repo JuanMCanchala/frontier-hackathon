@@ -1,3 +1,9 @@
+## 2026-10-10 13:12 — Sin push ni merge forzado
+Contexto: un push o merge forzado puede reescribir historia compartida o saltarse las reglas del repo ajeno.
+Decisión: prohibido `--force`, `--force-with-lease`, `push -f` y cualquier merge forzado o de admin. Solo procede si Bustamante aprueba primero y, después, da la indicación explícita.
+Descartado: permitirlo con un solo "haz force push" — no distingue un pedido apresurado de una aprobación consciente.
+Consecuencias: la historia publicada de `Bustamante` no se reescribe; un conflicto se resuelve con merge o rebase local no publicado, o se para y se pregunta.
+
 ## 2026-10-10 13:06 — Rama Bustamante y un PR hacia main
 Contexto: el repo es de JuanMCanchala y colaboramos con permiso de escritura. Hacía falta un carril fijo para los commits de Bustamante y un PR revisable, sin pushear a `main`.
 Decisión: todo el trabajo de este agente va en la rama `Bustamante`. Cada tarea la ejecuta un solo agente y sus commits son solo de esa tarea. Al empezar, se abre (o se reutiliza) un PR de `Bustamante` a `main` con `gh` como `Juan-GuevaraBusta`. No se mergea ni se pushea a `main` salvo pedido explícito.
