@@ -25,7 +25,7 @@ from PIL import Image
 from aprendiz.vnc import VncClient
 from eval.desktop_lock import DesktopLock
 from eval.evidencia import Tracker, append_log, boxes_json, save_evidence
-from eval.imgdiff import Thresholds, dhash
+from eval.imgdiff import Thresholds, compare, dhash
 
 log = logging.getLogger("eval.incidente")
 
@@ -34,6 +34,10 @@ PARK = (1279, 799)
 ARCHIVO, INICIO = (42, 48), (110, 76)
 COMERCIAL, MAESTROS, CLIENTES = (122, 48), (120, 76), (326, 76)
 SCREENS = ["inicio", "menu_comercial", "clientes"]
+# Passive mode: header and menu band, identical on every screen of the app and the
+# first thing a new theme changes. Read without moving the pointer or clicking.
+BAND = (0, 0, 1280, 62)
+BAND_SCREEN = "cabecera"
 
 Capture = dict[str, Image.Image]
 
@@ -104,6 +108,24 @@ async def do_round(base_url: str, password: str) -> RoundResult:
     return RoundResult(captures, code, latency)
 
 
+class BlankScreen(Exception):
+    """The desktop shows a uniform frame (browser restarting after a reset)."""
+
+
+async def do_passive_round(base_url: str, password: str) -> RoundResult:
+    """Health plus one screenshot of whatever is on screen: no pointer, no clicks."""
+    code, latency = await check_health(base_url)
+    async with VncClient() as client:
+        await client.connect(websocket_url(base_url), password)
+        image = await client.screenshot()
+    band = image.crop(BAND)
+    # A reset restarts the browser and leaves a black frame for a few seconds: that is
+    # not a change of the app, so the round is logged and skipped.
+    if all(high - low < 8 for low, high in band.getextrema()):
+        raise BlankScreen("pantalla vacía (el navegador se está reiniciando)")
+    return RoundResult({BAND_SCREEN: band}, code, latency)
+
+
 # ---- change tracking ---------------------------------------------------------
 
 
@@ -139,6 +161,38 @@ def load_references(base: Path) -> Capture:
     return {n: Image.open(folder / f"{n}.png").convert("RGB") for n in SCREENS}
 
 
+def _accept_band_variants(
+    base: Path,
+    reference: Image.Image,
+    thresholds: Thresholds,
+    round_fn: Callable[[str, str], Awaitable[RoundResult]],
+) -> Callable[[str, str], Awaitable[RoundResult]]:
+    """Known states of the same app (header dimmed by the startup modal, saved as
+    cabecera-*.png) count as the reference, not as a change."""
+    variants = [
+        Image.open(p).convert("RGB")
+        for p in sorted((base / "referencia").glob(f"{BAND_SCREEN}-*.png"))
+    ]
+
+    async def wrapped(url: str, password: str) -> RoundResult:
+        result = await round_fn(url, password)
+        band = result.captures.get(BAND_SCREEN)
+        if band is not None and any(not compare(v, band, thresholds).changed for v in variants):
+            result.captures[BAND_SCREEN] = reference
+        return result
+
+    return wrapped
+
+
+def load_band_reference(base: Path) -> Capture:
+    """Header band reference. A dedicated cabecera.png wins: Inicio may carry a startup
+    modal that darkens the header, which the band comparison must not see."""
+    band_file = base / "referencia" / f"{BAND_SCREEN}.png"
+    if band_file.is_file():
+        return {BAND_SCREEN: Image.open(band_file).convert("RGB")}
+    return {BAND_SCREEN: load_references(base)["inicio"].crop(BAND)}
+
+
 def process_round(tracker: Tracker, result: RoundResult, base: Path, when: datetime) -> list[str]:
     """Log the round and return the console lines for anything worth an alert."""
     stamp = f"{when:%H:%M:%S}"
@@ -154,8 +208,8 @@ def process_round(tracker: Tracker, result: RoundResult, base: Path, when: datet
             "health_latencia_s": round(result.health_latency_s or 0, 3),
         },
     )
-    for screen in SCREENS:
-        comparison, alert = tracker.observe(screen, result.captures[screen])
+    for screen, image in result.captures.items():
+        comparison, alert = tracker.observe(screen, image)
         entry: dict[str, object] = {
             "hora": when.isoformat(timespec="seconds"),
             "pantalla": screen,
@@ -191,7 +245,8 @@ async def cmd_referencia(base: Path, lock: DesktopLock) -> int:
     try:
         result = await do_round(url, password)
     finally:
-        lock.release()
+        if lock is not None:
+            lock.release()
     folder = save_reference(base, result.captures, _now(), desktop_host(url))
     print(f"Referencia guardada en {folder} (/health {result.health_code})")
     return 0
@@ -205,15 +260,20 @@ async def cmd_vigilar(
     rounds: int | None = None,
     sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     round_fn: Callable[[str, str], Awaitable[RoundResult]] = do_round,
+    passive: bool = False,
 ) -> int:
     url, password = _env()
-    tracker = Tracker(load_references(base), thresholds)
+    references = load_band_reference(base) if passive else load_references(base)
+    tracker = Tracker(references, thresholds)
+    if passive:
+        round_fn = do_passive_round if round_fn is do_round else round_fn
+        round_fn = _accept_band_variants(base, references[BAND_SCREEN], thresholds, round_fn)
     done = 0
     while rounds is None or done < rounds:
         done += 1
         started = time.monotonic()
         when = _now()
-        await _watch_once(base, lock, tracker, url, password, when, round_fn)
+        await _watch_once(base, None if passive else lock, tracker, url, password, when, round_fn)
         if rounds is None or done < rounds:
             await sleep(max(0.0, interval_s - (time.monotonic() - started)))
     return 0
@@ -221,7 +281,7 @@ async def cmd_vigilar(
 
 async def _watch_once(
     base: Path,
-    lock: DesktopLock,
+    lock: DesktopLock | None,
     tracker: Tracker,
     url: str,
     password: str,
@@ -229,7 +289,9 @@ async def _watch_once(
     round_fn: Callable[[str, str], Awaitable[RoundResult]],
 ) -> None:
     stamp = when.isoformat(timespec="seconds")
-    if not lock.try_acquire():
+    # A passive round only reads the screen, so it needs no lock and watches even
+    # while another process operates the desktop.
+    if lock is not None and not lock.try_acquire():
         append_log(base, {"hora": stamp, "tipo": "ocupado"})
         print(f"{when:%H:%M:%S} ocupado: otro proceso usa el escritorio, ronda saltada")
         return
@@ -244,7 +306,8 @@ async def _watch_once(
             print(f"{when:%H:%M:%S} ALERTA /health respondió {code}")
         return
     finally:
-        lock.release()
+        if lock is not None:
+            lock.release()
     lines = process_round(tracker, result, base, when)
     for line in lines:
         print(line)
@@ -258,6 +321,11 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     sub.add_parser("referencia")
     watch = sub.add_parser("vigilar")
     watch.add_argument("--intervalo", type=float, default=60.0)
+    watch.add_argument(
+        "--sin-clics",
+        action="store_true",
+        help="solo captura la cabecera de la pantalla actual, sin mover el puntero ni el lock",
+    )
     defaults = Thresholds()
     watch.add_argument("--umbral-hash", type=int, default=defaults.hash_distance)
     watch.add_argument("--umbral-area", type=int, default=defaults.changed_area_px)
@@ -279,7 +347,9 @@ def main(argv: list[str] | None = None) -> int:
         min_box_px=args.caja_minima,
     )
     try:
-        return asyncio.run(cmd_vigilar(BASE_DIR, lock, args.intervalo, thresholds))
+        return asyncio.run(
+            cmd_vigilar(BASE_DIR, lock, args.intervalo, thresholds, passive=args.sin_clics)
+        )
     except KeyboardInterrupt:
         return 0
 
