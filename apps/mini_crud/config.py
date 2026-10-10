@@ -1,0 +1,6 @@
+APP_NAME = "Taller Norte"
+APP_VERSION = "0.3"
+TODAY_LABEL = "Hoy"
+TODAY_TEXT = "10 de octubre de 2026"
+HTTP_HOST = "127.0.0.1"
+HTTP_PORT = 8765
