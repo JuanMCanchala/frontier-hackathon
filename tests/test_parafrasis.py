@@ -11,7 +11,7 @@ ORIGINALS = ROOT / "eval" / "pruebas"
 PARAPHRASES = ROOT / "eval" / "parafrasis"
 
 # Tasks 2 and 3 widen this set. Missing later ids are allowed until then.
-REQUIRED_NUMBERS = {1, 2, 3, 4}
+REQUIRED_NUMBERS = set(range(1, 9))
 
 # A calendar date or a code stays one token. Splitting 2026-10-15 would hide a leak
 # behind a year that another instruction already contains.
