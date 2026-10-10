@@ -53,7 +53,9 @@ PROTOCOLS: dict[str, str] = {
         "The filters set before exporting are visible and match the plan, and there is a visible "
         "export signal: a notice such as 'Report generated: RP-0001' right after the export "
         "click, or a generated-reports list with exactly one new report whose textual filters "
-        "match. Either signal is enough; the reports list is extra evidence, not required."
+        "match. Either signal is enough; the reports list is extra evidence, not required. If "
+        "the filtered list was empty right before the export ('No records', 0 results), the "
+        "filters were most likely not applied as intended: not verified."
     ),
     "fallar": (
         "The screenshots show the data that explains the failure: what was searched and what "
