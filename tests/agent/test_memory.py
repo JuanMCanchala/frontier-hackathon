@@ -5,7 +5,13 @@ from pathlib import Path
 
 import pytest
 
-from aprendiz.agent.memory import AppIdentity, AppMemory, MemoryHints, MemoryRejected
+from aprendiz.agent.memory import (
+    AppIdentity,
+    AppMemory,
+    MemoryHints,
+    MemoryRejected,
+    render_hints,
+)
 from aprendiz.config import Settings
 
 HASH_A = "a" * 16
@@ -104,6 +110,25 @@ def test_store_is_not_the_task_table(tmp_path: Path) -> None:
         names = {row[0] for row in rows}
     assert "tasks" not in names
     assert {"menu_routes", "procedures"} <= names
+
+
+def test_render_hints_keeps_few_short_lines(tmp_path: Path) -> None:
+    memory = AppMemory(tmp_path / "app_memory.sqlite3")
+    app = identity()
+    for name in ("Uno", "Dos", "Tres"):
+        memory.save_menu_route(app, (name,))
+    memory.save_procedure(app, ("Clientes", "Nuevo"), ("click", "click"))
+    current = memory.list_current(app)
+    lines = render_hints(current, max_routes=2, max_procedures=1, max_chars=80)
+    assert lines == ("Uno", "Dos", "Clientes > Nuevo: click, click")
+    clipped = render_hints(current, max_routes=1, max_procedures=0, max_chars=2)
+    assert clipped == ("U…",)
+
+
+def test_memory_is_enabled_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("MEMORY_ENABLED", raising=False)
+    settings = Settings(OPENROUTER_API_KEY="k", TEAM_TOKEN="t", _env_file=None)  # type: ignore[call-arg]
+    assert settings.MEMORY_ENABLED is True
 
 
 def test_injected_path_is_the_only_file_created(tmp_path: Path) -> None:

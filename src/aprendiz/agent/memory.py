@@ -117,6 +117,30 @@ def _reject(text: str, business_values: Sequence[str]) -> None:
             raise MemoryRejected("business_data")
 
 
+def render_hints(
+    hints: MemoryHints,
+    *,
+    max_routes: int,
+    max_procedures: int,
+    max_chars: int,
+) -> tuple[str, ...]:
+    """Short lines for the actor. Caps keep a hint from becoming a script."""
+
+    def clip(text: str) -> str:
+        if len(text) <= max_chars:
+            return text
+        if max_chars <= 1:
+            return "…"
+        return text[: max_chars - 1] + "…"
+
+    lines = [" > ".join(route.labels) for route in hints.routes[:max_routes]]
+    for procedure in hints.procedures[:max_procedures]:
+        path = " > ".join(procedure.labels)
+        actions = ", ".join(procedure.action_types)
+        lines.append(f"{path}: {actions}" if path else actions)
+    return tuple(clip(line) for line in lines)
+
+
 class AppMemory:
     """Routes and procedures for one app identity. An invalidated row stays, but is not listed."""
 

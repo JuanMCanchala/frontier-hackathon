@@ -1,12 +1,16 @@
 import asyncio
 import json
+import logging
 import time
 from pathlib import Path
 
 import pytest
+from PIL import Image
 
 from aprendiz.agent.budget import BudgetExceeded
 from aprendiz.agent.config import AgentSettings
+from aprendiz.agent.identity import screen_dhash
+from aprendiz.agent.memory import AppIdentity, AppMemory
 from aprendiz.agent.runner import AgentRunner
 from aprendiz.config import Settings, VncTimings
 from aprendiz.models import Escritorio, RunContext
@@ -54,6 +58,9 @@ def settings(tmp_path: Path) -> Settings:
         TRACES_DIR=str(tmp_path / "traces"),
         PLANNER_MODEL="planner-model",
         ACTOR_MODEL="actor-model",
+        # Off, and not the service file: this suite must not open data/app_memory.sqlite3.
+        APP_MEMORY_DB=str(tmp_path / "app_memory.sqlite3"),
+        MEMORY_ENABLED=False,
     )
 
 
@@ -618,3 +625,60 @@ async def test_verification_points_the_actor_at_the_target_values_and_keeps_the_
     assert result.estado == "terminada", result.resumen
     assert "Make these target values visible" in notes[-1]
     assert "nombre=Ana" in notes[-1] and "Cliente CL-1 creado" in notes[-1]
+
+
+def memory_settings(tmp_path: Path, *, enabled: bool = True) -> Settings:
+    return Settings(
+        OPENROUTER_API_KEY="sk-or-test-key-0000",
+        TEAM_TOKEN="team-token-test",
+        TRACES_DIR=str(tmp_path / "traces"),
+        PLANNER_MODEL="planner-model",
+        ACTOR_MODEL="actor-model",
+        APP_MEMORY_DB=str(tmp_path / "app_memory.sqlite3"),
+        MEMORY_ENABLED=enabled,
+        _env_file=None,  # type: ignore[call-arg]
+    )
+
+
+async def test_current_hints_reach_the_actor_only_while_executing(server, tmp_path):
+    settings = memory_settings(tmp_path)
+    app = AppIdentity("Facturas 1.2", screen_dhash(Image.new("RGB", (1280, 800))))
+    store = AppMemory(settings.APP_MEMORY_DB)
+    store.save_menu_route(app, ("Clientes", "Listado"))
+    store.save_procedure(app, ("Clientes",), ("click",))
+    store.close()
+    notes: list[str] = []
+
+    def actor(messages) -> str:
+        notes.append(messages[-1]["content"])
+        if len(notes) == 1:
+            return act(tipo="done", respuesta=["1,234"])
+        return act(tipo="done")
+
+    llm = question_llm(identidad=['{"texto": "Facturas 1.2"}'], actor=actor)
+    result = await make_runner(settings, tmp_path, llm).run(make_ctx(server))
+    assert result.estado == "terminada", result.resumen
+    assert "Clientes > Listado" in notes[0]
+    assert "click" in notes[0]
+    assert "screenshot wins" in notes[0]
+    assert "do not replay a sequence" in notes[0]
+    assert "do not reuse coordinates" in notes[0]
+    assert "Clientes" not in notes[1]
+
+
+async def test_sqlite_error_does_not_fail_the_task(server, tmp_path, caplog):
+    settings = memory_settings(tmp_path).model_copy(update={"APP_MEMORY_DB": str(tmp_path)})
+    llm = question_llm(identidad=['{"texto": "Facturas 1.2"}'])
+    with caplog.at_level(logging.WARNING):
+        result = await make_runner(settings, tmp_path, llm).run(make_ctx(server))
+    assert result.estado == "terminada", result.resumen
+    assert "app memory" in caplog.text.lower()
+
+
+async def test_disabled_memory_does_not_read(server, tmp_path):
+    settings = memory_settings(tmp_path, enabled=False)
+    llm = question_llm()
+    result = await make_runner(settings, tmp_path, llm).run(make_ctx(server))
+    assert result.estado == "terminada", result.resumen
+    assert llm.count("identidad") == 0
+    assert not Path(settings.APP_MEMORY_DB).exists()

@@ -18,8 +18,8 @@ from aprendiz.agent.structured import InvalidReply
 log = logging.getLogger(__name__)
 
 TITLE_SYSTEM_PROMPT = """\
-You read a desktop app screenshot. Find the application title in the header: the app name and
-its version, as shown. Reply with ONE JSON object: {"texto": "<copied exactly>"} or
+You read the application title from a desktop screenshot. Find it in the header: the app name
+and its version, as shown. Reply with ONE JSON object: {"texto": "<copied exactly>"} or
 {"texto": null} if that title is not visible. Copy the characters as shown; do not reformat,
 translate, or add a version that is not on screen.
 """

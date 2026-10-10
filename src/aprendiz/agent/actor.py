@@ -26,6 +26,7 @@ class ActorContext:
     note: str | None = None  # e.g. feedback from the previous step
     parametros: dict[str, str] = field(default_factory=dict)  # plan parameters, resolved by code
     modo: Literal["ejecucion", "verificacion"] = "ejecucion"
+    pistas: tuple[str, ...] = ()  # hints only; empty keeps existing callers unchanged
 
 
 class ActorAdapter(Protocol):
@@ -128,6 +129,12 @@ def _format_context(contexto: ActorContext, history_steps: int) -> str:
         lines.append("(none)")
     if contexto.note:
         lines.append(f"Note: {contexto.note}")
+    if contexto.modo == "ejecucion" and contexto.pistas:
+        lines.append(
+            "Hints from earlier tasks on this app. The current screenshot wins: "
+            "do not replay a sequence and do not reuse coordinates."
+        )
+        lines.extend(f"- {hint}" for hint in contexto.pistas)
     lines.append("Next action as JSON:")
     return "\n".join(lines)
 

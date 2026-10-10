@@ -47,6 +47,7 @@ ROLE_MARKERS = {
     "actor": "You operate a desktop business app",
     "classifier": "You classify one UI event",
     "today": "You read a desktop app screenshot",
+    "identidad": "You read the application title",
     "detector": "You compare two screenshots",
     "reader": "You read one form field",
     "submit": "You look at a 240x120 crop",

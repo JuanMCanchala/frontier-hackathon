@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     TRACES_DIR: str = "traces"
     TASKS_DB: str = "data/tasks.sqlite3"
     APP_MEMORY_DB: str = "data/app_memory.sqlite3"
+    MEMORY_ENABLED: bool = True
     STOP_GRACE_S: float = 2.0
     PREVIOUS_RELEASE_S: float = 3.0
     HOST: str = "0.0.0.0"

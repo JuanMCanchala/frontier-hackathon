@@ -112,6 +112,7 @@ class Episode:
         classifier_llm: Llm,
         auditor_llm: Llm,
         detector_llm: Llm,
+        hints: tuple[str, ...] = (),
     ) -> None:
         self.ctx = ctx
         self.agent = agent
@@ -124,6 +125,7 @@ class Episode:
         self._classifier_llm = classifier_llm
         self._auditor_llm = auditor_llm
         self._detector_llm = detector_llm
+        self.hints = hints
 
         self.history: list[str] = []
         self.last_shot: Image.Image | None = None
@@ -290,6 +292,7 @@ class Episode:
             note=note,
             parametros=self.params,
             modo=self._mode,
+            pistas=self.hints,
         )
 
     def _log(self, line: str) -> None:
