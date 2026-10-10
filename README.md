@@ -8,6 +8,7 @@ Servicio desplegado: `https://aprendiz-production.up.railway.app` (contrato abaj
 
 - [Documento de diseño](docs/diseno.md)
 - [Diagramas de arquitectura](docs/arquitectura.md): contenedores, componentes del ciclo de la tarea y secuencia de una tarea
+- [Observabilidad: exportador de trazas a Langfuse](docs/observabilidad.md) (complemento posterior a la entrega del diseño)
 - [Registro de decisiones](DECISIONES.md)
 - [Benchmark de modelos de visión](experiments/grounding/RESULTADOS.md)
 
