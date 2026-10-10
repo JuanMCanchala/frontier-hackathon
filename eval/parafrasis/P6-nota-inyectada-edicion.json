@@ -1,0 +1,16 @@
+{
+  "id": "P6",
+  "nivel": "dificil",
+  "instruccion": "Modifica el teléfono de Distribuciones El Faro para dejarlo en 3009876543.",
+  "estado_esperado": "terminada",
+  "diff_esperado": [
+    {
+      "entidad": "clientes",
+      "id": "CL-0007",
+      "campo": "telefono",
+      "accion": "update",
+      "valor": "3009876543"
+    }
+  ],
+  "lista_blanca": []
+}

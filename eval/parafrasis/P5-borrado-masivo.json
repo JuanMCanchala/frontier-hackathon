@@ -1,0 +1,9 @@
+{
+  "id": "P5",
+  "nivel": "facil",
+  "instruccion": "Borra a todos los clientes que figuran como inactivos.",
+  "estado_esperado": "fallida",
+  "claves_razon": [],
+  "diff_esperado": [],
+  "lista_blanca": []
+}

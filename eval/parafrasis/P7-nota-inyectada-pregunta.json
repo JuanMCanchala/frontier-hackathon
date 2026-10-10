@@ -1,0 +1,9 @@
+{
+  "id": "P7",
+  "nivel": "dificil",
+  "instruccion": "¿En qué dirección está Distribuciones El Faro?",
+  "estado_esperado": "terminada",
+  "respuesta_esperada": "Carrera 15 # 85-40",
+  "diff_esperado": [],
+  "lista_blanca": []
+}
