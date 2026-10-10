@@ -25,6 +25,7 @@ import httpx
 from aprendiz.redact import redact
 from eval.desktop_lock import DesktopBusy, DesktopLock
 from eval.incidente import desktop_host
+from eval.mini_oracle import mini_oracle
 from eval.report import Resultado, RunReport, render
 from eval.schema import LoadedTest, load_dir
 from eval.scoring import categoria, evaluate, verdict
@@ -54,6 +55,7 @@ class HarnessEnv:
     openrouter_key: str
     traces_dir: str
     budget_usd: float
+    mini_http_url: str | None = None
 
     @classmethod
     def from_environ(cls, environ: Mapping[str, str]) -> "HarnessEnv":
@@ -61,6 +63,7 @@ class HarnessEnv:
         missing = [name for name in required if not environ.get(name)]
         if missing:
             raise MissingEnv(f"faltan variables de entorno: {', '.join(missing)}")
+        mini = environ.get("MINI_HTTP_URL", "").rstrip("/")
         return cls(
             desktop_url=environ["DESKTOP_URL"].rstrip("/"),
             desktop_password=environ["DESKTOP_PASSWORD"],
@@ -69,6 +72,7 @@ class HarnessEnv:
             openrouter_key=environ.get("OPENROUTER_API_KEY", ""),
             traces_dir=environ.get("TRACES_DIR", "traces"),
             budget_usd=float(environ.get("HARNESS_BUDGET_USD", "30")),
+            mini_http_url=mini or None,
         )
 
     @property
@@ -123,14 +127,24 @@ class Harness:
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
         clock: Callable[[], float] = time.monotonic,
         watch: InitialScreenWatch | None = None,
+        mini: httpx.AsyncClient | None = None,
     ) -> None:
         self._env, self._desktop, self._api, self._or = env, desktop, api, openrouter
         self._t, self._sleep, self._clock = timings or Timings(), sleep, clock
         self._watch = watch
+        self._mini = mini
+        self._mini_before: list[dict[str, Any]] | None = None
 
     # ---- desktop ---------------------------------------------------------
 
     async def reset_desktop(self) -> None:
+        if self._mini is not None:
+            await self._mini_reset()
+        else:
+            await self._event_reset()
+        await self._sleep(self._t.reset_settle_s)
+
+    async def _event_reset(self) -> None:
         try:
             response = await self._desktop.post("/__reset")
         except httpx.HTTPError as exc:
@@ -138,7 +152,30 @@ class Harness:
         if response.status_code >= 300:
             raise StepError(f"/__reset respondió {response.status_code}")
         await self._wait_health()
-        await self._sleep(self._t.reset_settle_s)
+
+    async def _mini_reset(self) -> None:
+        assert self._mini is not None
+        try:
+            response = await self._mini.post("/reiniciar")
+        except httpx.HTTPError as exc:
+            raise StepError(f"/reiniciar falló: {type(exc).__name__}") from exc
+        if response.status_code != 200:
+            raise StepError(f"/reiniciar respondió {response.status_code}")
+        data = response.json()
+        if data.get("ok") is not True:
+            raise StepError(f"/reiniciar no devolvió ok: {data}")
+        # Capture before snapshot right after reset
+        self._mini_before = await self._mini_get_registros()
+
+    async def _mini_get_registros(self) -> list[dict[str, Any]]:
+        assert self._mini is not None
+        try:
+            response = await self._mini.get("/registros")
+        except httpx.HTTPError as exc:
+            raise StepError(f"GET /registros falló: {type(exc).__name__}") from exc
+        if response.status_code != 200:
+            raise StepError(f"GET /registros respondió {response.status_code}")
+        return response.json()
 
     async def _wait_health(self) -> None:
         start = self._clock()
@@ -154,6 +191,11 @@ class Harness:
             await self._sleep(self._t.health_interval_s)
 
     async def check(self, raw: Any) -> dict[str, Any]:
+        if self._mini is not None:
+            return await self._mini_check(raw)
+        return await self._event_check(raw)
+
+    async def _event_check(self, raw: Any) -> dict[str, Any]:
         try:
             response = await self._desktop.post("/__check", json=raw)
         except httpx.HTTPError as exc:
@@ -163,6 +205,13 @@ class Harness:
         if response.status_code != 200:
             raise StepError(f"/__check respondió {response.status_code}")
         return response.json()
+
+    async def _mini_check(self, raw: Any) -> dict[str, Any]:
+        assert self._mini is not None
+        after = await self._mini_get_registros()
+        before = self._mini_before or []
+        diff = raw.get("diff_esperado", []) if isinstance(raw, dict) else []
+        return mini_oracle(before, after, diff)
 
     # ---- our API ---------------------------------------------------------
 
@@ -280,6 +329,12 @@ class Harness:
         return report
 
     async def _final_reset(self, report: RunReport) -> None:
+        if self._mini is not None:
+            try:
+                await self._mini.post("/reiniciar")
+            except httpx.HTTPError as exc:
+                report.avisos.append(f"el reset final (mini) falló: {type(exc).__name__}")
+            return
         try:
             await self._desktop.post("/__reset")
         except httpx.HTTPError as exc:
