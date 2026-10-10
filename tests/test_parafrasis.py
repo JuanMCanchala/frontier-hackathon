@@ -10,8 +10,8 @@ ROOT = Path(__file__).resolve().parents[1]
 ORIGINALS = ROOT / "eval" / "pruebas"
 PARAPHRASES = ROOT / "eval" / "parafrasis"
 
-# Tasks 2 and 3 widen this set. Missing later ids are allowed until then.
-REQUIRED_NUMBERS = set(range(1, 9))
+# P1–P12. eval/pruebas stays exactly V1–V12.
+REQUIRED_NUMBERS = set(range(1, 13))
 
 # A calendar date or a code stays one token. Splitting 2026-10-15 would hide a leak
 # behind a year that another instruction already contains.
@@ -159,3 +159,8 @@ def test_each_existing_pair_keeps_the_wording_invariant() -> None:
     assert set(paraphrases) == REQUIRED_NUMBERS
     for number in sorted(REQUIRED_NUMBERS):
         _assert_pair(originals[number], paraphrases[number])
+
+
+def test_original_directory_is_exactly_v1_through_v12() -> None:
+    originals = _index(ORIGINALS, "V")
+    assert set(originals) == set(range(1, 13))
