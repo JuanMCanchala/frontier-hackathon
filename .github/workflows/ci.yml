@@ -17,5 +17,4 @@ jobs:
       - run: uv sync --frozen
       - run: uv run ruff check .
       - run: uv run ruff format --check .
-      # The agent package joins CI once it is merged.
-      - run: uv run pytest -q --ignore=tests/agent
+      - run: uv run pytest -q
