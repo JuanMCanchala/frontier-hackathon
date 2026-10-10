@@ -24,7 +24,10 @@ chromium \
   --disable-dev-shm-usage \
   --disable-gpu \
   --kiosk \
+  --window-position=0,0 \
   --window-size=1280,800 \
+  --lang=es \
+  --disable-features=Translate,TranslateUI \
   --app="http://127.0.0.1:8765/" &
 
 x11vnc \
