@@ -29,6 +29,7 @@ class Resultado:
     costo_usd: float | None = None
     llamadas: list[dict[str, Any]] = field(default_factory=list)
     error_prueba: str | None = None
+    avisos: list[str] = field(default_factory=list)
     motivos: list[str] = field(default_factory=list)
 
 
@@ -104,6 +105,8 @@ def render(report: RunReport) -> str:
     for r in valid:
         if not r.exito or r.post_lento:
             lines.append(f"{r.id} #{r.repeticion} [{r.categoria}]: {failure_reason(r)}")
+    for r in valid:
+        lines.extend(f"{r.id} #{r.repeticion}: AVISO {a}" for a in r.avisos)
     for r in errors:
         lines.append(f"{r.id}: ERROR DE PRUEBA (no cuenta en la tabla): {r.error_prueba}")
     if report.presupuesto_cortado is not None:

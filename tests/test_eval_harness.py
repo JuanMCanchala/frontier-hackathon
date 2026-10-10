@@ -7,6 +7,8 @@ import httpx
 from eval.harness import Harness, HarnessEnv, Timings, write_results
 from eval.report import render
 from eval.schema import parse_prueba
+from eval.vigilancia import InitialScreenWatch
+from PIL import Image, ImageDraw
 
 DIFF = {"entidad": "clientes", "id": "CL-1", "campo": "x", "valor": "v"}
 
@@ -189,3 +191,104 @@ async def test_results_file_never_contains_secrets(tmp_path: Path) -> None:
     text = path.read_text()
     assert path.name == "20261010-120000-mi-etiqueta-x.json"
     assert "pw-desk" not in text and "tok-team" not in text and "[REDACTED]" in text
+
+
+# ---- initial-screen watch ----------------------------------------------------
+
+
+def _screen(*rects: tuple[int, int, int, int]) -> Image.Image:
+    img = Image.new("RGB", (320, 200), (230, 230, 230))
+    draw = ImageDraw.Draw(img)
+    for r in rects:
+        draw.rectangle(r, fill=(20, 20, 20))
+    return img
+
+
+def _watch(tmp_path: Path, capture: Any, with_reference: bool = True) -> InitialScreenWatch:
+    base = tmp_path / "inc"
+    if with_reference:
+        (base / "referencia").mkdir(parents=True)
+        _screen().save(base / "referencia" / "inicio.png")
+    return InitialScreenWatch(capture, base=base)
+
+
+def _harness(tmp_path: Path, watch: InitialScreenWatch | None) -> tuple[Harness, World]:
+    world = World("ok")
+    transport = httpx.MockTransport(world.handler)
+    harness = Harness(
+        HarnessEnv(**{**ENV.__dict__, "traces_dir": str(tmp_path)}),
+        httpx.AsyncClient(transport=transport, base_url="https://desk.test"),
+        httpx.AsyncClient(transport=transport, base_url="http://api.test"),
+        None,
+        Timings(),
+        sleep=FakeClock().sleep,
+        clock=FakeClock(),
+        watch=watch,
+    )
+    return harness, world
+
+
+def _log(tmp_path: Path) -> list[dict[str, Any]]:
+    path = tmp_path / "inc" / "log.jsonl"
+    return [json.loads(x) for x in path.read_text().splitlines()] if path.exists() else []
+
+
+async def test_watch_same_screen_gives_no_alert(tmp_path: Path) -> None:
+    async def capture() -> Image.Image:
+        return _screen()
+
+    harness, world = _harness(tmp_path, _watch(tmp_path, capture))
+    report = await harness.run_all([loaded()], 1)
+    assert report.resultados[0].avisos == []
+    assert not [a for a in report.avisos if "referencia" in a]
+    [entry] = _log(tmp_path)
+    assert entry["origen"] == "harness" and entry["prueba"] == "T1" and entry["cambio"] is False
+    assert not list((tmp_path / "inc").glob("*-inicio-harness"))
+    assert world.calls.index("POST desk.test/__reset") < world.calls.index("POST api.test/tasks")
+
+
+async def test_watch_changed_screen_alerts_once_with_evidence(tmp_path: Path) -> None:
+    async def capture() -> Image.Image:
+        return _screen((100, 80, 219, 159))
+
+    harness, _ = _harness(tmp_path, _watch(tmp_path, capture))
+    report = await harness.run_all([loaded(id="A"), loaded(id="B")], 1)
+    first, second = report.resultados
+    assert (
+        len(first.avisos) == 1 and "pantalla inicial distinta de la referencia" in first.avisos[0]
+    )
+    assert second.avisos == []  # same view as the last alert: not repeated
+    [folder] = (tmp_path / "inc").glob("*-inicio-harness")
+    assert {p.name for p in folder.iterdir()} == {"antes.png", "despues.png", "diff.png"}
+    entries = _log(tmp_path)
+    assert [e["cambio"] for e in entries] == [True, True]
+    assert entries[0]["prueba"] == "A" and entries[0]["cajas"] and entries[0]["area"] > 0
+    assert "evidencia" in entries[0] and "evidencia" not in entries[1]
+    assert "pantalla inicial distinta de la referencia" in render(report)
+
+
+async def test_watch_without_reference_warns_once_and_continues(tmp_path: Path) -> None:
+    calls = 0
+
+    async def capture() -> Image.Image:
+        nonlocal calls
+        calls += 1
+        return _screen()
+
+    harness, _ = _harness(tmp_path, _watch(tmp_path, capture, with_reference=False))
+    report = await harness.run_all([loaded(id="A"), loaded(id="B")], 1)
+    assert calls == 0
+    assert len(report.resultados) == 2
+    assert [a for a in report.avisos if "sin referencia" in a].__len__() == 1
+
+
+async def test_watch_capture_failure_does_not_break_the_run(tmp_path: Path) -> None:
+    async def capture() -> Image.Image:
+        raise ConnectionError("vnc down")
+
+    harness, _ = _harness(tmp_path, _watch(tmp_path, capture))
+    report = await harness.run_all([loaded()], 1)
+    [r] = report.resultados
+    assert r.task_id == "task-1" and r.error_prueba is None
+    assert any("captura de vigilancia falló" in a for a in r.avisos)
+    assert _log(tmp_path)[0]["tipo"] == "error"
