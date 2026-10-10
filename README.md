@@ -20,7 +20,7 @@ Servicio desplegado: `https://aprendiz-production.up.railway.app` (contrato abaj
 | `POST /tasks`          | Body `{"tarea": "...", "escritorio": {"url": "wss://…/websockify", "password": "…"}}`. Responde `{"task_id": "…"}` en menos de 2 s y trabaja en segundo plano. |
 | `GET /tasks/{task_id}` | `{"estado": "en_curso" \| "terminada" \| "fallida", "resumen": "…"}`                                                                                           |
 
-`POST /tasks` y `GET /tasks/{id}` llevan `Authorization: Bearer <TEAM_TOKEN>`. Cada tarea tiene un corte duro a los 260 s desde el `POST`: el servicio cierra la conexión VNC y recién después publica el estado.
+`POST /tasks` y `GET /tasks/{id}` llevan `Authorization: Bearer <TEAM_TOKEN>`. Cada tarea tiene un corte duro a los 285 s desde el `POST` (el actor deja de emitir a los 250 s): el servicio cierra la conexión VNC y recién después publica el estado.
 
 ## Correr en local
 
