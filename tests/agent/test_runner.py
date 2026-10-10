@@ -7,6 +7,7 @@ import pytest
 
 from aprendiz.agent.budget import BudgetExceeded
 from aprendiz.agent.config import AgentSettings
+from aprendiz.agent.llm import LlmError
 from aprendiz.agent.runner import AgentRunner
 from aprendiz.config import Settings, VncTimings
 from aprendiz.models import Escritorio, RunContext
@@ -1155,3 +1156,11 @@ async def test_a_slow_or_garbled_desktop_handshake_is_retried_once(
     ctx = make_ctx(server, deadline_in=120)
     result = await make_runner(settings, tmp_path, question_llm()).run(ctx)
     assert calls == 2 and result.estado == "terminada", result.resumen
+
+
+async def test_a_failed_detector_never_counts_as_the_save_signal(server, settings, tmp_path):
+    """The detector assumes persistence when it fails, so an unauthorized event still aborts;
+    that guess must not satisfy the save-signal rule for a create (a review found the hole)."""
+    llm = save_llm([FILL, SAVE, act(tipo="wait")], detector=[LlmError("timeout")])
+    result = await run_painted(server, settings, tmp_path, llm, actor_in=6)
+    assert result.estado == "fallida" and "señal de guardado" in result.resumen

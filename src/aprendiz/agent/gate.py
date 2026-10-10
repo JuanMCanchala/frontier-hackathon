@@ -282,7 +282,10 @@ def _postcheck(
         # Judged on the auditor's reading, not before it: a click that writes nothing (the
         # "what's new" notice of the incident theme, before any search) must not need a search.
         if not searched:
-            return _deny("the entity was not searched before writing")
+            return _deny(
+                "the entity was not searched before writing: type its name or code in the list's "
+                "search/filter box, apply the filter, then open the record from the results"
+            )
     if reply.escritura == "create" and reply.ya_existe:
         return _deny("the entity already exists", reply.datos or [reply.motivo], final=True)
     is_continuation = reply.continuacion and evidencia.continuacion_de is not None

@@ -26,7 +26,12 @@ from aprendiz.agent.classifier import (
     is_submit_button,
 )
 from aprendiz.agent.config import AgentSettings
-from aprendiz.agent.detector import NOISE_PIXELS, changed_fraction, detect_effect
+from aprendiz.agent.detector import (
+    DETECTOR_UNAVAILABLE,
+    NOISE_PIXELS,
+    changed_fraction,
+    detect_effect,
+)
 from aprendiz.agent.fields import iso_date, read_field_value, read_form_values, value_matches
 from aprendiz.agent.gate import EvidenceContext, GateState, Verdict, allowed_originals, authorize
 from aprendiz.agent.llm import DeadlineExceeded, Llm, LlmError
@@ -820,8 +825,12 @@ class Episode:
                 deadline=self._deadline,
             )
         rec["efecto"] = effect.model_dump()
-        self._last_effect_persisted = effect.persistio
-        if effect.persistio and authorized:
+        # A failed detector assumes persistence so that an unauthorized event aborts; that
+        # assumption must never count as the save signal a create or edit needs to be reported
+        # done (it let a fill that only typed satisfy the rule).
+        observed = effect.persistio and effect.señal != DETECTOR_UNAVAILABLE
+        self._last_effect_persisted = observed
+        if observed and authorized:
             self._signal = effect.señal or self._signal
             self.persist_shot = after
         if effect.debe_abortar:
@@ -867,6 +876,7 @@ class Episode:
             self.search_shots = [*self.search_shots, after][-_SEARCH_SHOTS_KEPT:]
         if verdict is not None and clase == "compromiso":
             self._form_initial = None
+            self._fill_grants = {}  # a commitment may open another record: authorize afresh
             self._prev_write = verdict.motivo or describe(action)
             if not changed:
                 self._unconfirmed = action_key(action)
@@ -977,7 +987,10 @@ class Episode:
             )
         )
         if abort:
-            self._note = f"The form fill stopped: {abort}. Look at the screen and decide again."
+            self._note = (
+                f"The form fill stopped: {abort}. Look at the screen and decide again. If a field "
+                "is not taken, click inside that field, then use type for its value."
+            )
         else:
             self._fill = FillRecord(after, describe(action))
 

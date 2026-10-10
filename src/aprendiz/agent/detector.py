@@ -55,6 +55,7 @@ def changed_fraction(antes: Image.Image, despues: Image.Image) -> tuple[int, flo
     return changed, changed / (despues.width * despues.height)
 
 
+DETECTOR_UNAVAILABLE = "detector unavailable"  # señal of an assumed (not observed) persistence
 NOTICE_BAND_TOP = 0.6  # changes confined below this share of the height look like a notice
 
 
@@ -116,6 +117,6 @@ async def detect_effect(
         return Effect(
             persistio=clasificacion in _PERSISTING,
             autorizado=autorizado,
-            señal="detector unavailable",
+            señal=DETECTOR_UNAVAILABLE,
         )
     return Effect(persistio=reply.persisted, autorizado=autorizado, señal=reply.signal)
