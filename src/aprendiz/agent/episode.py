@@ -64,6 +64,13 @@ LATE_LOOK_S = 1.0  # extra wait before re-reading a screen that did not change a
 VIEW_CHANGE = 0.15  # share of the screen a navigation must repaint to count as a new view
 
 
+def _fill_key(action: Action) -> tuple[tuple[str, str], ...] | None:
+    """What a fill_form writes, ignoring where the actor pointed (it drifts by a pixel)."""
+    if action.tipo != "fill_form" or not action.campos:
+        return None
+    return tuple(sorted((c.etiqueta.casefold(), c.valor) for c in action.campos))
+
+
 def _edits_text(combo: str) -> bool:
     """Keys that only make sense inside a text field."""
     return combo.lower().replace(" ", "") in _EDIT_KEYS
@@ -148,6 +155,7 @@ class Episode:
         self._table_llm = table_llm or classifier_llm
         self._asked_fail_data = False
         self.table_result: TableResult | None = None
+        self._fill_grants: dict[tuple[tuple[str, str], ...], Verdict] = {}
 
         self.history: list[str] = []
         self.last_shot: Image.Image | None = None
@@ -625,6 +633,13 @@ class Episode:
         self, action: Action, shot: Image.Image, point: tuple[int, int], rec: dict
     ) -> Verdict | None:
         key = action_key(action)
+        fill_key = _fill_key(action)
+        if fill_key is not None and fill_key in self._fill_grants:
+            # The same fields and values on the same form were already authorized: a retry after
+            # a stopped fill must not pay the auditor again (V10 spent its budget on 9 calls).
+            verdict = self._fill_grants[fill_key]
+            rec["veredicto"] = verdict.model_dump()
+            return verdict
         if self._unconfirmed == key:
             verdict = Verdict(
                 decision="denegar_corregible",
@@ -657,6 +672,8 @@ class Episode:
         rec["veredicto"] = verdict.model_dump()
         if verdict.decision == "permitir":
             self.trace.writes_authorized += 1
+            if fill_key is not None:
+                self._fill_grants[fill_key] = verdict
             return verdict
         self.trace.writes_denied += 1
         self._deny(action, verdict.motivo, verdict.datos, rec, verdict.decision == "denegar_final")
@@ -844,6 +861,7 @@ class Episode:
             # baseline there left the Save of PD-0143 without its "form when opened".
             self._form_initial = None
             self.evidence_form = None
+            self._fill_grants = {}
         if clase == "busqueda_filtro" and changed:
             self._unconfirmed = None
             self.search_shots = [*self.search_shots, after][-_SEARCH_SHOTS_KEPT:]
@@ -1068,8 +1086,14 @@ class Episode:
         await self.client.click(*point)
         after, _ = await self._after(click, shot, "compromiso", False, rec)
         clase = await self._classify(after, point, "type")
-        if clase not in _TEXT_FIELDS:
+        if clase == "compromiso":
             raise _FillAborted(f"the point for {campo.etiqueta!r} is not a text field")
+        if clase not in _TEXT_FIELDS:
+            # Some themes draw inputs the crop classifier reads as plain navigation (the v4.2
+            # phone field). It does not look like a button, the fill is authorized and the click
+            # persisted nothing, so type and let the batch re-read judge the value.
+            log.warning("field not recognised after focus, typing", extra={"campo": campo.etiqueta})
+            return "campo_registro"
         return clase
 
     @staticmethod
