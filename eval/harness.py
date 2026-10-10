@@ -25,6 +25,7 @@ import httpx
 from aprendiz.redact import redact
 from eval.desktop_lock import DesktopBusy, DesktopLock
 from eval.incidente import desktop_host
+from eval.langfuse_export import LangfuseConfig, export_results_file, load_config
 from eval.report import Resultado, RunReport, render
 from eval.schema import LoadedTest, load_dir
 from eval.scoring import categoria, evaluate, verdict
@@ -322,6 +323,40 @@ def write_results(
     return path
 
 
+def export_to_langfuse(
+    path: Path,
+    env: HarnessEnv,
+    langfuse: LangfuseConfig,
+    transport: httpx.BaseTransport | None = None,
+    sleep: Callable[[float], None] = time.sleep,
+) -> None:
+    """Best effort: observability must never cost a finished run its results."""
+    secrets = [*env.secrets, langfuse.public_key, langfuse.secret_key]
+    try:
+        export_results_file(
+            path, Path(env.traces_dir), langfuse, secrets, transport=transport, sleep=sleep
+        )
+    except Exception as exc:  # any exporter bug is logged, never raised
+        log.warning("langfuse export crashed", extra={"error": type(exc).__name__})
+
+
+def finish_run(
+    report: RunReport,
+    etiqueta: str,
+    env: HarnessEnv,
+    results_dir: Path,
+    now: datetime,
+    langfuse: LangfuseConfig,
+    transport: httpx.BaseTransport | None = None,
+    sleep: Callable[[float], None] = time.sleep,
+) -> Path:
+    print(redact(render(report), env.secrets))
+    path = write_results(report, etiqueta, env.secrets, results_dir, now)
+    print(f"\nResultados: {path}")
+    export_to_langfuse(path, env, langfuse, transport, sleep)
+    return path
+
+
 def select_tests(dirs: list[str], solo: str | None) -> list[LoadedTest]:
     tests = [t for d in dirs for t in load_dir(Path(d).expanduser())]
     if solo:
@@ -388,9 +423,7 @@ async def run(args: argparse.Namespace, tests: list[LoadedTest], env: HarnessEnv
         )
         harness = Harness(env, desktop, api, router if env.openrouter_key else None, watch=watch)
         report = await harness.run_all(tests, args.repeticiones)
-    print(redact(render(report), env.secrets))
-    path = write_results(report, args.etiqueta, env.secrets, RESULTS_DIR, datetime.now())
-    print(f"\nResultados: {path}")
+    finish_run(report, args.etiqueta, env, RESULTS_DIR, datetime.now(), load_config())
     return 0
 
 

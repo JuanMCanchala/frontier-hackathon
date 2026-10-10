@@ -4,9 +4,11 @@ from pathlib import Path
 from typing import Any
 
 import httpx
-from eval.harness import Harness, HarnessEnv, Timings, write_results
+import pytest
+from eval.harness import Harness, HarnessEnv, Timings, finish_run, write_results
 from eval.incidente import desktop_host
-from eval.report import render
+from eval.langfuse_export import LangfuseConfig
+from eval.report import Resultado, RunReport, render
 from eval.schema import parse_prueba
 from eval.vigilancia import InitialScreenWatch
 from PIL import Image, ImageDraw
@@ -192,6 +194,107 @@ async def test_results_file_never_contains_secrets(tmp_path: Path) -> None:
     text = path.read_text()
     assert path.name == "20261010-120000-mi-etiqueta-x.json"
     assert "pw-desk" not in text and "tok-team" not in text and "[REDACTED]" in text
+
+
+# ---- langfuse hook -------------------------------------------------------------
+
+LANGFUSE = LangfuseConfig(host="https://lf.test", public_key="pk-lf-t", secret_key="sk-lf-t")
+
+
+def _closed_run(tmp_path: Path) -> tuple[RunReport, HarnessEnv]:
+    trace = tmp_path / "traces" / "task-1"
+    trace.mkdir(parents=True)
+    (trace / "resumen.json").write_text(
+        json.dumps({"task_id": "task-1", "estado": "terminada", "llamadas": []})
+    )
+    report = RunReport(
+        resultados=[
+            Resultado(
+                id="T1",
+                fuente="T1.json",
+                categoria="crear",
+                repeticion=1,
+                task_id="task-1",
+                estado="terminada",
+                exito=True,
+            )
+        ]
+    )
+    return report, HarnessEnv(**{**ENV.__dict__, "traces_dir": str(tmp_path / "traces")})
+
+
+def _crash(request: httpx.Request) -> httpx.Response:
+    raise RuntimeError("langfuse exploded")
+
+
+@pytest.mark.parametrize(
+    "handler",
+    [lambda request: httpx.Response(500), _crash],
+    ids=["http-500", "unexpected-exception"],
+)
+def test_langfuse_failure_does_not_break_the_harness(
+    tmp_path: Path, handler: Any, caplog: pytest.LogCaptureFixture
+) -> None:
+    calls: list[httpx.Request] = []
+
+    def recording(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        return handler(request)
+
+    report, env = _closed_run(tmp_path)
+    path = finish_run(
+        report,
+        "corrida",
+        env,
+        tmp_path / "out",
+        datetime(2026, 10, 10, 12, 0, 0),
+        LANGFUSE,
+        transport=httpx.MockTransport(recording),
+        sleep=lambda s: None,
+    )
+    assert path.is_file() and json.loads(path.read_text())["resultados"][0]["task_id"] == "task-1"
+    assert calls, "the export must have been attempted"
+    assert "langfuse" in caplog.text.lower()
+
+
+def test_harness_exports_after_writing_results(tmp_path: Path) -> None:
+    bodies: list[dict[str, Any]] = []
+
+    def accept(request: httpx.Request) -> httpx.Response:
+        bodies.append(json.loads(request.content))
+        return httpx.Response(207, json={"successes": [], "errors": []})
+
+    report, env = _closed_run(tmp_path)
+    finish_run(
+        report,
+        "corrida",
+        env,
+        tmp_path / "out",
+        datetime(2026, 10, 10, 12, 0, 0),
+        LANGFUSE,
+        transport=httpx.MockTransport(accept),
+        sleep=lambda s: None,
+    )
+    types = {e["type"] for b in bodies for e in b["batch"]}
+    assert {"trace-create", "score-create"} <= types
+    assert "tok-team" not in json.dumps(bodies)
+
+
+def test_harness_without_langfuse_config_makes_no_call(tmp_path: Path) -> None:
+    def forbidden(request: httpx.Request) -> httpx.Response:
+        raise AssertionError("no call expected")
+
+    report, env = _closed_run(tmp_path)
+    path = finish_run(
+        report,
+        "corrida",
+        env,
+        tmp_path / "out",
+        datetime(2026, 10, 10, 12, 0, 0),
+        LangfuseConfig(host="", public_key="", secret_key=""),
+        transport=httpx.MockTransport(forbidden),
+    )
+    assert path.is_file()
 
 
 # ---- initial-screen watch ----------------------------------------------------
