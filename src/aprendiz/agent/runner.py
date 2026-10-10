@@ -10,7 +10,7 @@ from aprendiz.agent.actor import ActorAdapter, ActorError, PixelJsonActor
 from aprendiz.agent.budget import Budget, BudgetExceeded, GlobalSpend, SpendFileError
 from aprendiz.agent.config import SCREEN_HEIGHT, SCREEN_WIDTH, AgentSettings
 from aprendiz.agent.episode import EndTask, Episode, Fin
-from aprendiz.agent.hoy import ParamError, read_today, resolve_params
+from aprendiz.agent.hoy import ParamError, needs_today, read_today, resolve_params
 from aprendiz.agent.llm import Llm, LlmError, OpenRouterClient
 from aprendiz.agent.planner import PlanError, plan_from_task
 from aprendiz.agent.schemas import Plan
@@ -186,6 +186,7 @@ class AgentRunner:
             classifier_llm=classifier,
             auditor_llm=trace.llm(llm, "auditor"),
             detector_llm=trace.llm(llm, "detector"),
+            table_llm=trace.llm(llm, "lector_tabla"),
         )
         try:
             last = await episode.run_execution()
@@ -204,29 +205,44 @@ class AgentRunner:
             return Finish.failed(
                 "fail", last.motivo or "el actor no pudo completar la tarea", last.datos_motivo
             )
-        return await self._verify(ctx, plan, params, episode, trace, trace.llm(llm, "verificador"))
+        return await self._verify(
+            ctx,
+            plan,
+            params,
+            episode,
+            trace,
+            trace.llm(llm, "verificador"),
+            claimed=last.respuesta,
+        )
 
     async def _resolve_params(
         self, ctx: RunContext, plan: Plan, classifier: Llm, first
-    ) -> tuple[str, dict[str, str]] | Finish:
-        hoy = await read_today(
+    ) -> tuple[str | None, dict[str, str]] | Finish:
+        hoy = None
+        if needs_today(plan.parametros):
+            hoy = await self._read_hoy(ctx, classifier, first)
+            if hoy is None:
+                names = ", ".join(plan.parametros)
+                return Finish.failed(
+                    "error",
+                    f"no se pudo leer la fecha 'Hoy' de la aplicación, necesaria para: {names}",
+                )
+        try:
+            resolved = resolve_params(plan.parametros, hoy)
+        except ParamError as exc:
+            return Finish.failed("error", str(exc))
+        fmt = self._agent.DATE_FORMAT
+        hoy_text = hoy.strftime(fmt) if hoy else None
+        return hoy_text, {name: value.strftime(fmt) for name, value in resolved.items()}
+
+    async def _read_hoy(self, ctx: RunContext, classifier: Llm, first):
+        return await read_today(
             classifier,
             first,
             model=self._agent.CLASSIFIER_MODEL,
             fallback=self._agent.CLASSIFIER_FALLBACK_MODEL,
             deadline=ctx.actor_deadline,
         )
-        if hoy is None:
-            names = ", ".join(plan.parametros)
-            return Finish.failed(
-                "error", f"no se pudo leer la fecha 'Hoy' de la aplicación, necesaria para: {names}"
-            )
-        try:
-            resolved = resolve_params(plan.parametros, hoy)
-        except ParamError as exc:
-            return Finish.failed("error", str(exc))
-        fmt = self._agent.DATE_FORMAT
-        return hoy.strftime(fmt), {name: value.strftime(fmt) for name, value in resolved.items()}
 
     async def _verify(
         self,
@@ -237,9 +253,10 @@ class AgentRunner:
         trace: TaskTrace,
         verifier_llm: Llm,
         fin: Fin = "done",
+        claimed: list[str] | None = None,
     ) -> Finish:
         # After a timeout there is no navigation: verify with what is on screen now.
-        navigate = fin == "done"
+        navigate = fin == "done" and plan.tipo != "preguntar"
         if plan.tipo in _WRITE_TYPES and trace.writes_authorized == 0:
             return Finish.failed(
                 fin, "el actor declaró terminar sin que se autorizara ninguna escritura"
@@ -248,6 +265,7 @@ class AgentRunner:
             return Finish.failed(fin, "no quedó tiempo para verificar el resultado")
         finales = await episode.run_verification() if navigate else episode.static_evidence()
         evidencia = [Captura("results of the last search", s) for s in episode.search_shots[-2:]]
+        evidencia += episode.question_views()
         if episode.persist_shot is not None:
             evidencia.append(Captura("the screen right after saving", episode.persist_shot))
         if episode.evidence_form is not None:
@@ -262,6 +280,9 @@ class AgentRunner:
             model=self._agent.VERIFIER_MODEL,
             fallback=self._agent.VERIFIER_FALLBACK_MODEL,
             deadline=ctx.deadline - 2,
+            memo=episode.memo,
+            respuesta_actor=claimed,
+            computed=episode.table_result is not None,
         )
         if not result.verificado:
             return Finish(
@@ -274,7 +295,9 @@ class AgentRunner:
             "terminada",
             fin,
             respuesta=result.respuesta or [],
-            fuente=result.observado[0] if plan.tipo == "preguntar" and result.observado else None,
+            fuente=episode.memo
+            if episode.table_result is not None
+            else (result.observado[0] if plan.tipo == "preguntar" and result.observado else None),
             hechos=facts_from_plan(plan, params) if plan.tipo in _WRITE_TYPES else [],
             verificado=True,
         )

@@ -4,7 +4,7 @@ from PIL import Image
 
 from aprendiz.agent.gate import allowed_values
 from aprendiz.agent.schemas import Plan
-from aprendiz.agent.textmatch import fold
+from aprendiz.agent.textmatch import fold, fragment_of
 
 
 def text_allowed(plan: Plan, tarea: str, parametros: dict[str, str], text: str) -> bool:
@@ -13,9 +13,9 @@ def text_allowed(plan: Plan, tarea: str, parametros: dict[str, str], text: str) 
     one presses Enter."""
     if not text.strip() or any(c in text for c in "\r\n\t"):
         return False
-    folded = fold(text)
-    if folded in fold(tarea):
+    if fragment_of(tarea, text):
         return True
+    folded = fold(text)
     known = {fold(v) for v in allowed_values(plan, parametros)} | {
         fold(v) for v in parametros.values()
     }

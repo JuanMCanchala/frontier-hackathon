@@ -55,6 +55,18 @@ def changed_fraction(antes: Image.Image, despues: Image.Image) -> tuple[int, flo
     return changed, changed / (despues.width * despues.height)
 
 
+NOTICE_BAND_TOP = 0.6  # changes confined below this share of the height look like a notice
+
+
+def _lower_band_only(antes: Image.Image, despues: Image.Image) -> bool:
+    """True if every changed pixel lies in the lower band, where save notices appear."""
+    if antes.size != despues.size:
+        return False
+    diff = ImageChops.difference(antes.convert("L"), despues.convert("L"))
+    box = diff.point(lambda v: 255 if v > PIXEL_THRESHOLD else 0).getbbox()
+    return box is not None and box[1] >= despues.height * NOTICE_BAND_TOP
+
+
 async def detect_effect(
     llm: Llm,
     antes: Image.Image,
@@ -70,10 +82,13 @@ async def detect_effect(
     changed, fraction = changed_fraction(antes, despues)
     if changed <= NOISE_PIXELS:
         return Effect(persistio=False, autorizado=autorizado)
-    # Navigation (and hover and scroll, which arrive as such) never reaches the model: a
-    # framebuffer comparison is all the second line spends on reads.
+    # Navigation (and hover and scroll, which arrive as such) normally never reaches the model.
+    # Exception: a click read as navigation whose only change sits in the lower part of the
+    # screen looks like a save notice ("Cliente CL-0141 creado"), the signature of a commit
+    # button the classifier got wrong. That one is checked, so a misread never writes unseen.
     if clasificacion == "navegacion":
-        return Effect(persistio=False, autorizado=autorizado)
+        if not (evento.startswith(("click", "double_click")) and _lower_band_only(antes, despues)):
+            return Effect(persistio=False, autorizado=autorizado)
     if clasificacion not in _PERSISTING and fraction < LARGE_CHANGE_FRACTION:
         return Effect(persistio=False, autorizado=autorizado)
     messages: list[Message] = [

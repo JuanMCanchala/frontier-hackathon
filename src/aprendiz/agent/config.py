@@ -55,6 +55,10 @@ class AgentSettings(BaseSettings):
     DATE_FORMAT: str = "%d/%m/%Y"  # how resolved date parameters are typed into the app
     MIN_CALL_S: float = 4  # no model call starts with less time than this left to its deadline
     CONTINUITY_MAX_PIXELS: int = 300  # pixels allowed to differ between end of fill and Save
+    OSCILLATION_FAIL_STEPS: int = 4  # steps of continued oscillation, after the warning
+    QUESTION_MAX_VIEWS: int = 10  # distinct views kept as evidence for a question
+    QUESTION_VIEW_SIZE: tuple[int, int] = (960, 600)
+    TABLE_MAX_PAGES: int = 15
     VERIFY_MAX_STEPS: int = 10
     VERIFY_RESERVE_S: float = 10  # verification navigation stops this long before the hard deadline
     MAX_CORRECTABLE_DENIALS: int = 2  # per action; the next denial of the same action is final

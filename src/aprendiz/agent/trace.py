@@ -5,13 +5,16 @@ import logging
 import os
 import tempfile
 import time
+from collections import Counter
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
 from PIL import Image
+from pydantic import BaseModel
 
 from aprendiz.agent.llm import ChatResult, ImageInput, Llm, Message
+from aprendiz.agent.structured import REASK_PREFIX
 from aprendiz.redact import redact
 
 log = logging.getLogger(__name__)
@@ -34,6 +37,7 @@ class _RoleLlm:
         json_mode: bool = False,
         max_tokens: int | None = None,
         deadline: float | None = None,
+        schema: type[BaseModel] | None = None,
     ) -> ChatResult:
         started = time.monotonic()
         result = await self._inner.chat(
@@ -43,7 +47,10 @@ class _RoleLlm:
             json_mode=json_mode,
             max_tokens=max_tokens,
             deadline=deadline,
+            schema=schema,
         )
+        if messages[-1]["content"].startswith(REASK_PREFIX):
+            self._trace.reasks += 1
         self._trace.calls.append(
             {
                 "rol": self._rol,
@@ -67,6 +74,7 @@ class TaskTrace:
         self.calls: list[dict[str, Any]] = []
         self.stability_waits: list[float] = []
         self.steps = 0
+        self.reasks = 0
         self.writes_authorized = 0
         self.writes_denied = 0
 
@@ -100,6 +108,8 @@ class TaskTrace:
             "costo_usd": self.cost_usd,
             "pasos": self.steps,
             "llamadas": self.calls,
+            "llamadas_por_rol": dict(Counter(c["rol"] for c in self.calls)),
+            "reintentos_respuesta_invalida": self.reasks,
             "esperas_estabilidad_s": self.stability_waits,
             "escrituras_autorizadas": self.writes_authorized,
             "escrituras_denegadas": self.writes_denied,

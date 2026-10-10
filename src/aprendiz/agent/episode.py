@@ -11,7 +11,7 @@ import time
 from collections import Counter, defaultdict
 from collections.abc import Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Literal
 
 from PIL import Image
@@ -27,10 +27,20 @@ from aprendiz.agent.classifier import (
 )
 from aprendiz.agent.config import AgentSettings
 from aprendiz.agent.detector import NOISE_PIXELS, changed_fraction, detect_effect
-from aprendiz.agent.fields import read_field_value, value_matches
+from aprendiz.agent.fields import read_field_value, read_form_values, value_matches
 from aprendiz.agent.gate import EvidenceContext, GateState, Verdict, allowed_originals, authorize
 from aprendiz.agent.llm import DeadlineExceeded, Llm, LlmError
 from aprendiz.agent.schemas import Action, Campo, Plan
+from aprendiz.agent.structured import InvalidReply
+from aprendiz.agent.table_reader import (
+    Punto,
+    TableAccumulator,
+    TableError,
+    TablePage,
+    TableResult,
+    aggregate,
+    read_table_page_checked,
+)
 from aprendiz.agent.textmatch import exact_hint
 from aprendiz.agent.textrule import blank_region, crop_box, text_allowed
 from aprendiz.agent.trace import TaskTrace
@@ -47,6 +57,14 @@ _HISTORY_LINE_CHARS = 240
 _SEARCH_SHOTS_KEPT = 3
 _WRITE_PLAN_TYPES = ("crear", "editar", "exportar")
 _CONTINUITY_ACTIONS = {"create", "update"}
+
+
+_EDIT_KEYS = {"ctrl+a", "backspace", "delete"}
+
+
+def _edits_text(combo: str) -> bool:
+    """Keys that only make sense inside a text field."""
+    return combo.lower().replace(" ", "") in _EDIT_KEYS
 
 
 class EndTask(Exception):
@@ -112,6 +130,7 @@ class Episode:
         classifier_llm: Llm,
         auditor_llm: Llm,
         detector_llm: Llm,
+        table_llm: Llm | None = None,
     ) -> None:
         self.ctx = ctx
         self.agent = agent
@@ -124,6 +143,9 @@ class Episode:
         self._classifier_llm = classifier_llm
         self._auditor_llm = auditor_llm
         self._detector_llm = detector_llm
+        self._table_llm = table_llm or classifier_llm
+        self._asked_fail_data = False
+        self.table_result: TableResult | None = None
 
         self.history: list[str] = []
         self.last_shot: Image.Image | None = None
@@ -144,6 +166,10 @@ class Episode:
         self._times: defaultdict[str, float] = defaultdict(float)
         self._last_effect_persisted = False
         self._signal: str | None = None
+        self._memo: str | None = None
+        self._views: list[tuple[Image.Image, bool]] = []
+        self._recent: list[tuple[str, str, bool]] = []  # (key, description, changed)
+        self._osc_warned_at: int | None = None
         self.persist_shot: Image.Image | None = None
         self._persisted_writes = 0
         self._plan_complete = False
@@ -164,8 +190,24 @@ class Episode:
         for _ in range(self.agent.MAX_STEPS):
             self._checkpoint()
             shot = await self._snap()
+            self._note_view(shot)
             terminal = await self._step(shot)
             if terminal is not None:
+                if (
+                    terminal.tipo == "fail"
+                    and not terminal.datos_motivo
+                    and not self._asked_fail_data
+                ):
+                    # The summary must name what was searched and found: ask once for it.
+                    self._asked_fail_data = True
+                    self._note = (
+                        "Your fail has no datos_motivo. Reply with fail again listing the concrete "
+                        "values you read that justify it: what you searched, what you found "
+                        "(names, documents, codes), the missing datum."
+                    )
+                    continue
+                if terminal.tipo == "done" and self._table_mode():
+                    return await self._answer_from_table()
                 return terminal
             if self._plan_complete:
                 return Action(tipo="done", razon="persistence signal completed the plan's writes")
@@ -210,8 +252,162 @@ class Episode:
 
     # ---- one step --------------------------------------------------------
 
+    @property
+    def memo(self) -> str | None:
+        return self._memo
+
+    def _note_view(self, shot: Image.Image) -> None:
+        """For questions: keep distinct views (result pages, filters) as evidence, shrunk to
+        control cost. At the cap the oldest view goes, except the first, the last, and those
+        where the actor noted a total."""
+        if self.plan.tipo != "preguntar":
+            return
+        if self._views and changed_fraction(self._views[-1][0], shot)[0] <= NOISE_PIXELS:
+            return
+        self._views.append((shot, False))
+        while len(self._views) > self.agent.QUESTION_MAX_VIEWS:
+            drop = next((i for i in range(1, len(self._views) - 1) if not self._views[i][1]), 1)
+            del self._views[drop]
+
+    def _mark_total_view(self) -> None:
+        if self._views and self._memo and "total" in self._memo.lower():
+            self._views[-1] = (self._views[-1][0], True)
+
+    def question_views(self) -> list[Captura]:
+        size = self.agent.QUESTION_VIEW_SIZE
+        return [
+            Captura(f"view {n} the actor went through", img.convert("RGB").resize(size))
+            for n, (img, _) in enumerate(self._views, 1)
+        ]
+
     def _time_left(self) -> float:
         return self._deadline - time.monotonic()
+
+    def _table_mode(self) -> bool:
+        return (
+            self._mode == "ejecucion"
+            and self.plan.tipo == "preguntar"
+            and self.plan.consulta is not None
+        )
+
+    async def _answer_from_table(self) -> Action:
+        """Walk the table from its first page, transcribe each page, and let code count or add.
+        The answer comes from here, never from the actor's own tally. Any doubt about having seen
+        every page exactly once ends the task fallida instead of answering a partial count."""
+        consulta = self.plan.consulta
+        assert consulta is not None
+        acc = TableAccumulator()
+        page = await self._rewind(await self._table_page(acc), acc)
+        acc.add(page)
+        while page.hay_siguiente:
+            if len(acc.pages) == self.agent.TABLE_MAX_PAGES:
+                raise EndTask(
+                    "fail", f"la tabla tiene más de {len(acc.pages)} páginas", self._so_far(acc)
+                )
+            page = await self._turn_page(page, acc)
+        try:
+            result = aggregate(consulta, acc.pages)
+        except TableError as exc:
+            raise EndTask("fail", str(exc), self._so_far(acc)) from exc
+        if result.coherente is False:
+            raise EndTask(
+                "fail",
+                "el total que muestra la aplicación no coincide con las filas leídas",
+                [*self._so_far(acc), f"filas leídas: {result.filas_leidas}"],
+            )
+        self.table_result = result
+        self._memo = result.desglose
+        return Action(
+            tipo="done",
+            respuesta=[result.valor],
+            memo=result.desglose[:300],
+            razon="computed by code from the table pages",
+        )
+
+    @staticmethod
+    def _so_far(acc: TableAccumulator) -> list[str]:
+        return [f"páginas leídas: {len(acc.pages)}"]
+
+    async def _table_page(self, acc: TableAccumulator) -> TablePage:
+        if self._time_left() < 2 * self.agent.MIN_CALL_S:
+            raise EndTask(
+                "actor_deadline", "se agotó el tiempo leyendo la tabla", self._so_far(acc)
+            )
+        self.ctx.lease.ensure_active()
+        shot = await self._snap()
+        self._note_view(shot)
+        try:
+            with self._timed("lectura_tabla"):
+                return await read_table_page_checked(
+                    self._table_llm,
+                    shot,
+                    model=self.agent.CLASSIFIER_MODEL,
+                    fallback=self.agent.CLASSIFIER_FALLBACK_MODEL,
+                    deadline=self._deadline,
+                )
+        except (LlmError, InvalidReply) as exc:
+            raise EndTask("error", f"no se pudo leer la tabla: {exc}") from exc
+
+    async def _rewind(self, page: TablePage, acc: TableAccumulator) -> TablePage:
+        """The actor should leave the first page on screen; if the pagination says otherwise,
+        go back to it before counting."""
+        for _ in range(self.agent.TABLE_MAX_PAGES):
+            if not page.pagina_actual or page.pagina_actual <= 1:
+                return page
+            await self._click_pager(page.anterior, "previous")
+            back = await self._table_page(acc)
+            if back.pagina_actual is not None and back.pagina_actual >= page.pagina_actual:
+                raise EndTask("fail", "no se pudo volver a la primera página de la tabla")
+            page = back
+        raise EndTask("fail", "no se pudo volver a la primera página de la tabla")
+
+    async def _turn_page(self, page: TablePage, acc: TableAccumulator) -> TablePage:
+        """Click next and read until a page not seen before shows up. A slow refresh gets one
+        more look before a second click, so a late redraw never makes us skip a page."""
+        await self._click_pager(page.siguiente, "next")
+        for attempt in range(3):
+            new = await self._table_page(acc)
+            if acc.add(new):
+                prev, cur = page.pagina_actual, new.pagina_actual
+                if prev and cur and cur != prev + 1:
+                    jump = f"la paginación saltó de la página {prev} a la {cur}"
+                    raise EndTask("fail", jump, self._so_far(acc))
+                return new
+            log.warning("table page repeated after next", extra={"attempt": attempt + 1})
+            if attempt == 0:
+                await asyncio.sleep(1.0)
+            elif attempt == 1:
+                await self._click_pager(new.siguiente, "next")
+        raise EndTask(
+            "fail",
+            "la paginación no avanzó: no se puede asegurar que se leyeron todas las filas",
+            self._so_far(acc),
+        )
+
+    async def _click_pager(self, point: Punto | None, which: Literal["next", "previous"]) -> None:
+        """Navigation only. The table reader usually gives the button; if not, the actor locates
+        it with the consulta stripped from its plan, since that rule tells it to reply done."""
+        shot = self.last_shot
+        assert shot is not None
+        if point is not None:
+            xy = (point.x, point.y)
+        else:
+            context = replace(
+                self._context(
+                    f"Reply with a click action on the '{which} page' button of the table "
+                    "pagination. Nothing else."
+                ),
+                plan=self.plan.model_copy(update={"consulta": None}),
+            )
+            try:
+                xy = await self._locate(shot, context, f"the {which}-page button")
+            except _FillAborted as exc:
+                raise EndTask("fail", str(exc)) from exc
+        clase = await self._classify(shot, xy, "click")
+        if clase not in ("navegacion", "busqueda_filtro"):
+            raise EndTask("fail", f"el botón de página ({which}) no es navegación")
+        with self._timed("ejecucion"):
+            await self.client.click(*xy)
 
     def static_evidence(self) -> list[Captura]:
         """What is on screen now, with no navigation: for a task that ran out of time."""
@@ -278,6 +474,9 @@ class Episode:
                 raise EndTask("actor_deadline", "se agotó el tiempo esperando al modelo") from None
             raise
         self._invalid_replies = 0
+        if action.memo:
+            self._memo = action.memo
+            self._mark_total_view()
         return action
 
     def _context(self, note: str | None) -> ActorContext:
@@ -288,6 +487,7 @@ class Episode:
             hoy_app=self.hoy_text,
             seconds_left=max(0.5, self._deadline - time.monotonic()),
             note=note,
+            memo=self._memo,
             parametros=self.params,
             modo=self._mode,
         )
@@ -388,6 +588,8 @@ class Episode:
         self._note = f"Denied: {motivo}"
         too_many = self._denials[key] > self.agent.MAX_CORRECTABLE_DENIALS
         if self._mode == "ejecucion" and (final or too_many):
+            if not datos and self.plan.entidad:
+                datos = [f"entidad buscada: {self.plan.entidad}"]
             raise EndTask("fail", motivo, datos)
 
     async def _authorize(
@@ -403,13 +605,14 @@ class Episode:
         else:
             evidence = EvidenceContext(
                 captura_actual=shot,
-                capturas_busqueda=list(self.search_shots),
+                capturas_busqueda=self.search_shots[-1:],
                 captura_formulario_inicial=None
                 if action.tipo == "fill_form"
                 else self._form_initial,
                 recorte_evento=crop_around(shot, point),
                 parametros=self.params,
                 continuacion_de=self._prev_write,
+                tarea=self.ctx.tarea,
             )
             with self._timed("auditor"):
                 verdict = await authorize(
@@ -439,6 +642,11 @@ class Episode:
                 action, "never use Tab to move between fields; click each field", [], rec, False
             )
             return
+        if _edits_text(combo) and (self._focus is None or self._focus[1] not in _TEXT_FIELDS):
+            # ctrl+a with no text field focused selects the whole page, and the selection
+            # outlives the task (seen on the practice app after a missed click).
+            self._deny(action, "click a text field before using editing keys", [], rec, False)
+            return
         if self._focus is None:
             clase: Clasificacion = "compromiso"  # no focus point to look at: deny by default
             point = (0, 0)
@@ -449,6 +657,13 @@ class Episode:
         await self._dispatch(action, shot, clase, point, rec)
 
     async def _type(self, action: Action, shot: Image.Image, rec: dict) -> None:
+        if self._focus is not None and self._focus[1] not in _TEXT_FIELDS:
+            # A focused input shows a border or caret that the crop at click time did not:
+            # look again before refusing.
+            shot = await self._snap()
+            again = await self._classify(shot, self._focus[0], "type")
+            if again in _TEXT_FIELDS:
+                self._focus = (self._focus[0], again)
         if self._focus is None or self._focus[1] not in _TEXT_FIELDS:
             self._deny(action, "click a text field before typing", [], rec, False)
             return
@@ -579,6 +794,7 @@ class Episode:
         after: Image.Image,
         changed: bool,
     ) -> None:
+        self._recent.append((action_key(action), describe(action), changed))
         self._log(
             f"{describe(action)} [{clase}] -> "
             + ("screen changed" if changed else "no visible change")
@@ -603,6 +819,41 @@ class Episode:
             self._prev_write = verdict.motivo or describe(action)
             if not changed:
                 self._unconfirmed = action_key(action)
+        self._check_oscillation()
+
+    def _oscillation(self) -> tuple[str, str] | None:
+        """The last four actions alternate between two points, or repeat one with no visible
+        change. Returns the descriptions involved."""
+        last = self._recent[-4:]
+        if len(last) < 4:
+            return None
+        keys = [k for k, _, _ in last]
+        if keys[0] == keys[2] and keys[1] == keys[3] and keys[0] != keys[1]:
+            return last[0][1], last[1][1]
+        if len(set(keys)) == 1 and not any(changed for _, _, changed in last):
+            return last[0][1], last[0][1]
+        return None
+
+    def _check_oscillation(self) -> None:
+        if self._mode != "ejecucion":
+            return
+        found = self._oscillation()
+        if found is None:
+            self._osc_warned_at = None
+            return
+        x, y = found
+        if self._osc_warned_at is None:
+            self._osc_warned_at = self.trace.steps
+        elif self.trace.steps - self._osc_warned_at >= self.agent.OSCILLATION_FAIL_STEPS:
+            raise EndTask(
+                "fail",
+                f"la tarea no avanza: oscila entre {x} y {y}",
+                [self._memo] if self._memo else [],
+            )
+        self._note = (
+            f"You are oscillating between {x} and {y}: do not go back. Use your notes, use the "
+            "list's filters, or answer with what you have already counted."
+        )
 
     # ---- typing -----------------------------------------------------------------
 
@@ -680,60 +931,66 @@ class Episode:
             self._fill = FillRecord(after, describe(action))
 
     async def _fill_fields(self, campos: list[Campo], first_shot: Image.Image, rec: dict) -> None:
-        """One direct click per field. The re-read of a text field overlaps with the recapture
-        and classification of the next one; a mismatch is settled before the next click."""
-        pending: tuple[asyncio.Task[str | None], tuple[int, int], str] | None = None
+        """One direct click per field, each classified once. The values are re-read together,
+        once, after the whole batch."""
         last: tuple[Image.Image, tuple[int, int]] | None = None
-        try:
-            for campo in campos:
-                shot = first_shot if last is None else await self._snap()
-                point = (campo.x, campo.y)
-                if last is not None and self._layout_shifted(last[0], shot, last[1]):
-                    point = await self._relocate(shot, campo)
-                clase = await self._classify(shot, point, "click")
-                await self._settle_read(pending)
-                pending = None
-                if campo.tipo == "select":
-                    last = (await self._fill_select(point, clase, campo), point)
-                    continue
-                if clase in _TEXT_FIELDS:
-                    with self._timed("ejecucion"):
-                        await self.client.click(*point)
-                else:
-                    clase = await self._focus_by_click(point, shot, campo, rec)
-                self._focus = (point, clase)
-                typed = await self._write_field(campo.valor)
-                pending = (
-                    asyncio.create_task(self._read_value(typed, point)),
-                    point,
-                    campo.valor,
-                )
-                last = (typed, point)
-            await self._settle_read(pending)
-            pending = None
-        finally:
-            if pending is not None:
-                pending[0].cancel()
-                await asyncio.gather(pending[0], return_exceptions=True)
+        typed_fields: list[tuple[Campo, tuple[int, int]]] = []
+        for campo in campos:
+            shot = first_shot if last is None else await self._snap()
+            point = (campo.x, campo.y)
+            if last is not None and self._layout_shifted(last[0], shot, last[1]):
+                point = await self._relocate(shot, campo)
+            clase = await self._classify(shot, point, "click")
+            if campo.tipo == "select":
+                last = (await self._fill_select(point, clase, campo), point)
+                continue
+            if clase in _TEXT_FIELDS:
+                with self._timed("ejecucion"):
+                    await self.client.click(*point)
+            else:
+                clase = await self._focus_by_click(point, shot, campo, rec)
+            self._focus = (point, clase)
+            last = (await self._write_field(campo.valor), point)
+            typed_fields.append((campo, point))
+        if last is not None and typed_fields:
+            await self._verify_batch(last[0], typed_fields)
 
-    async def _settle_read(
-        self, pending: tuple[asyncio.Task[str | None], tuple[int, int], str] | None
+    async def _read_batch(
+        self, shot: Image.Image, items: list[tuple[Campo, tuple[int, int]]]
+    ) -> list[tuple[Campo, tuple[int, int], str | None]]:
+        with self._timed("lectura_campo"):
+            values = await read_form_values(
+                self._classifier_llm,
+                shot,
+                [(c.etiqueta, p) for c, p in items],
+                model=self.agent.CLASSIFIER_MODEL,
+                fallback=self.agent.CLASSIFIER_FALLBACK_MODEL,
+                deadline=self._deadline,
+            )
+        return [(c, p, values.get(c.etiqueta)) for c, p in items]
+
+    async def _verify_batch(
+        self, form: Image.Image, items: list[tuple[Campo, tuple[int, int]]]
     ) -> None:
-        if pending is None:
-            return
-        task, point, text = pending
-        read = await task
-        if value_matches(read, text):
+        """Rewrite only the fields whose value does not match, then check just those again."""
+        bad = [
+            (c, p)
+            for c, p, read in await self._read_batch(form, items)
+            if not value_matches(read, c.valor)
+        ]
+        if not bad:
             return
         log.warning(
-            "typed value does not match, rewriting once",
-            extra={"read": read, "expected": text},
+            "typed values do not match, rewriting", extra={"fields": [c.etiqueta for c, _ in bad]}
         )
-        with self._timed("ejecucion"):
-            await self.client.click(*point)
-        read = await self._read_value(await self._write_field(text), point)
-        if not value_matches(read, text):
-            self._note_mismatch(point, read, text)
+        shot = form
+        for campo, point in bad:
+            with self._timed("ejecucion"):
+                await self.client.click(*point)
+            shot = await self._write_field(campo.valor)
+        for campo, point, read in await self._read_batch(shot, bad):
+            if not value_matches(read, campo.valor):
+                self._note_mismatch(point, read, campo.valor)
 
     async def _fill_select(self, point: tuple[int, int], clase: Clasificacion, campo: Campo):
         """Open the dropdown, recapture, and click the option whose text is the value. The
@@ -791,11 +1048,16 @@ class Episode:
             repr(campo.etiqueta),
         )
 
-    async def _locate(self, shot: Image.Image, instruction: str, what: str) -> tuple[int, int]:
+    async def _locate(
+        self, shot: Image.Image, instruction: str | ActorContext, what: str
+    ) -> tuple[int, int]:
         """Ask the actor for the coordinates of a control; it must answer with a click."""
+        context = (
+            instruction if isinstance(instruction, ActorContext) else self._context(instruction)
+        )
         try:
             with self._timed("actor"):
-                action = await self.actor.next_action(shot, self._context(instruction))
+                action = await self.actor.next_action(shot, context)
         except (ActorError, DeadlineExceeded) as exc:
             raise _FillAborted(f"could not locate {what}") from exc
         if action.tipo != "click":

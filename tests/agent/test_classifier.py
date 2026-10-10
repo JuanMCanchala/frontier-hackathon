@@ -70,7 +70,7 @@ async def test_cache_by_crop_and_event_type():
 
 async def test_different_crop_is_not_a_cache_hit():
     other = SHOT.copy()
-    other.paste((255, 0, 0), (590, 390, 610, 410))
+    other.paste((255, 0, 0), (300, 300, 900, 500))
     cache = ClassificationCache()
     llm = FakeLlm([reply("navegacion"), reply("compromiso")])
     await classify_event(
@@ -82,27 +82,42 @@ async def test_different_crop_is_not_a_cache_hit():
     assert len(llm.calls) == 2
 
 
-async def test_votes_disagree_most_restrictive_wins():
-    llm = FakeLlm([reply("navegacion"), reply("campo_registro")])
+async def test_second_vote_only_after_a_field_or_commitment_answer():
+    llm = FakeLlm([reply("navegacion")])
+    assert await classify(llm, votes=2) == "navegacion"
+    assert len(llm.calls) == 1  # read-only first answer: no second vote
+    llm = FakeLlm([reply("campo_registro"), reply("navegacion")])
     assert await classify(llm, votes=2) == "campo_registro"
     assert len(llm.calls) == 2
-    llm = FakeLlm([reply("busqueda_filtro"), reply("compromiso")])
-    assert await classify(llm, votes=2) == "compromiso"
+    llm = FakeLlm([reply("campo_registro"), reply("compromiso")])
+    assert await classify(llm, votes=2) == "compromiso"  # most restrictive wins
 
 
-async def test_two_votes_that_agree_are_cached_once():
+async def test_agreeing_votes_are_cached_once():
     cache = ClassificationCache()
-    llm = FakeLlm([reply("navegacion"), reply("navegacion")])
-    assert await classify(llm, cache=cache, votes=2) == "navegacion"
-    assert await classify(llm, cache=cache, votes=2) == "navegacion"
+    llm = FakeLlm([reply("compromiso"), reply("compromiso")])
+    assert await classify(llm, cache=cache, votes=2) == "compromiso"
+    assert await classify(llm, cache=cache, votes=2) == "compromiso"
     assert len(llm.calls) == 2
 
 
-async def test_one_failed_vote_means_commitment_and_is_not_cached():
+async def test_a_failed_vote_means_commitment_and_is_not_cached():
     cache = ClassificationCache()
-    llm = FakeLlm([reply("navegacion"), LlmError("x"), reply("navegacion"), reply("navegacion")])
+    llm = FakeLlm([reply("campo_registro"), LlmError("x"), reply("navegacion")])
     assert await classify(llm, cache=cache, votes=2) == "compromiso"
     assert await classify(llm, cache=cache, votes=2) == "navegacion"
+
+
+async def test_same_view_and_nearby_point_hit_the_approximate_cache():
+    cache = ClassificationCache()
+    llm = FakeLlm([reply("navegacion")])
+    await classify(llm, cache=cache, punto=(600, 400))
+    repainted = SHOT.copy()
+    repainted.paste((0, 0, 0), (10, 10, 14, 14))  # tiny repaint elsewhere: crop is identical
+    got = await classify_event(
+        llm, repainted, (603, 402), "click", "ejecucion", model="m", cache=cache, votes=1
+    )
+    assert got == "navegacion" and len(llm.calls) == 1
 
 
 async def test_moderation_block_retries_with_fallback_model():

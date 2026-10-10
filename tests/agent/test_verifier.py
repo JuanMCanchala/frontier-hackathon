@@ -109,3 +109,80 @@ async def test_edit_protocol_needs_unique_identity_and_the_new_value():
 async def test_a_protocol_element_that_is_not_shown_still_fails_a_write():
     result, _ = await run("crear", reply(no_verificable=["campo telefono visible"]))
     assert not result.verificado
+
+
+async def test_question_verification_gets_every_view_the_notes_and_the_claim():
+    llm = FakeLlm([reply(observado=["3 páginas suman 45"], respuesta=["45"])])
+    plan = Plan(tipo="preguntar", entidad="Ferretería Ruiz")
+    views = [Captura(f"view {n}", IMG) for n in (1, 2, 3)]
+    result = await verify(
+        llm,
+        plan,
+        "preguntar",
+        views,
+        [Captura("final", IMG)],
+        model="v",
+        memo="Total 45 facturas vencidas",
+        respuesta_actor=["45"],
+    )
+    assert result.verificado and result.respuesta == ["45"]
+    assert len(llm.calls[0]["images"]) == 4
+    prompt = llm.calls[0]["messages"][-1]["content"]
+    assert "Total 45 facturas vencidas" in prompt and "image 3: view 3" in prompt
+    assert "VETO only on contradicting evidence" in prompt
+
+
+async def test_question_with_incomplete_captures_is_accepted_on_the_actor_answer():
+    llm = FakeLlm([reply(observado=[], no_verificable=["páginas 4 a 6"], respuesta=None)])
+    result = await verify(
+        llm, Plan(tipo="preguntar"), "preguntar", [], [Captura("f", IMG)], model="v",
+        memo="p1: 12, p2: 13, p3: 20, total 45", respuesta_actor=["45"],
+    )  # fmt: skip
+    assert result.verificado and result.respuesta == ["45"]
+    assert "total 45" in llm.calls[0]["messages"][-1]["content"]
+
+
+async def test_question_with_a_contradicting_total_is_not_verified():
+    llm = FakeLlm([reply(contradice=True, respuesta=["52"], datos_motivo=["total visible: 52"])])
+    result = await verify(
+        llm, Plan(tipo="preguntar"), "preguntar", [], [Captura("f", IMG)], model="v",
+        respuesta_actor=["45"],
+    )  # fmt: skip
+    assert not result.verificado
+
+
+async def test_question_without_any_answer_is_not_verified():
+    result, _ = await run("preguntar", reply(), plan_q := Plan(tipo="preguntar"))
+    assert not result.verificado and plan_q
+
+
+async def test_writes_still_need_the_full_protocol_even_if_contradice_is_false():
+    result, _ = await run("crear", reply(no_verificable=["registro"], contradice=False))
+    assert not result.verificado
+
+
+async def test_actor_answer_that_does_not_match_its_own_breakdown_is_not_verified():
+    for memo, answer in (("p1: 12", ["40"]), ("p1: 12, p2: 13, total 25", ["40"])):
+        llm = FakeLlm([reply(respuesta=answer)])
+        result = await verify(
+            llm, Plan(tipo="preguntar"), "preguntar", [], [Captura("f", IMG)], model="v",
+            memo=memo, respuesta_actor=answer,
+        )  # fmt: skip
+        assert not result.verificado, memo
+        assert "desglose" in result.datos_motivo[0]
+
+
+async def test_computed_answer_is_not_second_guessed_by_the_verifier_or_memo():
+    llm = FakeLlm([reply(respuesta=["44"])])
+    result = await verify(
+        llm, Plan(tipo="preguntar"), "preguntar", [], [Captura("f", IMG)], model="v",
+        memo="p1: 12, p2: 13, p3: 20 → 45", respuesta_actor=["45"], computed=True,
+    )  # fmt: skip
+    assert result.verificado and result.respuesta == ["45"]
+    assert "computed by code" in llm.calls[0]["messages"][-1]["content"]
+    llm = FakeLlm([reply(contradice=True)])
+    veto = await verify(
+        llm, Plan(tipo="preguntar"), "preguntar", [], [Captura("f", IMG)], model="v",
+        memo="p1: 12", respuesta_actor=["45"], computed=True,
+    )  # fmt: skip
+    assert not veto.verificado
