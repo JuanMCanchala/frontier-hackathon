@@ -24,6 +24,7 @@ FAST = VncTimings(
 NAV = json.dumps({"clase": "navegacion"})
 FIELD = json.dumps({"clase": "campo_registro"})
 NO_EFFECT = json.dumps({"persisted": False, "signal": ""})
+SAVED = json.dumps({"persisted": True, "signal": "Registro guardado"})
 VERIFIED = json.dumps(
     {
         "verificado": True,
@@ -289,6 +290,7 @@ async def test_form_fill_is_authorized_once_clicks_each_field_and_never_uses_tab
         {"verificado": True, "observado": ["registro reabierto"], "no_verificable": []}
     )
     llm = question_llm(
+        detector=[SAVED],
         planner=[plan],
         actor=[
             act(
@@ -303,7 +305,7 @@ async def test_form_fill_is_authorized_once_clicks_each_field_and_never_uses_tab
         auditor=[allow],
         verifier=[verified],
     )
-    result = await make_runner(settings, tmp_path, llm).run(make_ctx(server))
+    result = await run_painted(server, settings, tmp_path, llm)
     assert result.estado == "terminada", result.resumen
     assert result.resumen == "Cliente creado: nombre=Ana"
     assert llm.count("auditor") == 1 and llm.count("form_reader") == 1
@@ -404,7 +406,8 @@ async def test_fill_form_point_first_called_commitment_is_clicked_and_reclassifi
         verifier=[verified],
     )
     result = await make_runner(settings, tmp_path, llm).run(make_ctx(server))
-    assert result.estado == "terminada", result.resumen
+    # Fill only, no Save: never reported done without a persistence signal.
+    assert "señal de guardado" in result.resumen, result.resumen
     assert llm.count("auditor") == 1 and llm.count("form_reader") == 1
     assert server.key_events  # the values were typed
     assert summary_json(settings)["escrituras_autorizadas"] == 1
@@ -574,10 +577,11 @@ async def test_fill_form_with_a_select_opens_it_and_clicks_the_located_option(
     )
     llm = save_llm(
         [act(tipo="fill_form", campos=campos), act(tipo="click", x=400, y=300), act(tipo="done")],
+        detector=[SAVED],
         planner=[plan],
         classifier=[FIELD],
     )
-    result = await make_runner(settings, tmp_path, llm).run(make_ctx(server))
+    result = await run_painted(server, settings, tmp_path, llm)
     assert result.estado == "terminada", result.resumen
     assert llm.count("auditor") == 1 and llm.count("form_reader") == 1  # the select is not re-read
     clicked = {(e[1][1:3], e[1][3:5]) for e in server.pointer_events if e[1][0] == 1}
@@ -588,14 +592,22 @@ async def test_fill_form_with_a_select_opens_it_and_clicks_the_located_option(
 async def test_deadline_with_an_authorized_write_still_verifies_what_is_on_screen(
     server, settings, tmp_path
 ):
-    llm = save_llm(
-        [FILL, SAVE, act(tipo="wait")], detector=[json.dumps({"persisted": False, "signal": ""})]
-    )
+    llm = save_llm([FILL, SAVE, act(tipo="wait")], detector=[SAVED])
     result = await run_painted(server, settings, tmp_path, llm, actor_in=6)
     assert result.estado == "terminada", result.resumen
-    data = summary_json(settings)
-    assert data["motivo_fin"] == "actor_deadline" and data["verificado"] is True
+    assert summary_json(settings)["verificado"] is True
     assert llm.count("verifier") == 1
+
+
+async def test_a_write_with_no_persistence_signal_is_never_reported_done(
+    server, settings, tmp_path
+):
+    """V6 on v4.2: "Aplicar" left the form open with the typed phone, nothing was saved, and
+    the verifier accepted the open form as the save. A false success."""
+    llm = save_llm([FILL, SAVE, act(tipo="wait")], detector=[NO_EFFECT])
+    result = await run_painted(server, settings, tmp_path, llm, actor_in=6)
+    assert result.estado == "fallida" and "señal de guardado" in result.resumen
+    assert llm.count("verifier") == 0
 
 
 async def test_deadline_with_an_unverifiable_write_is_fallida(server, settings, tmp_path):
@@ -608,7 +620,7 @@ async def test_deadline_with_an_unverifiable_write_is_fallida(server, settings, 
         verifier=[unverified],
     )
     result = await run_painted(server, settings, tmp_path, llm, actor_in=6)
-    assert result.estado == "fallida" and "registro guardado" in result.resumen
+    assert result.estado == "fallida" and "señal de guardado" in result.resumen
     assert summary_json(settings)["motivo_fin"] == "actor_deadline"
 
 
@@ -813,7 +825,8 @@ async def test_fill_form_rereads_all_fields_in_one_call_and_rewrites_only_the_wr
         verifier=[verified],
     )
     result = await make_runner(settings, tmp_path, llm).run(make_ctx(server))
-    assert result.estado == "terminada", result.resumen
+    # Fill only, no Save: never reported done without a persistence signal.
+    assert "señal de guardado" in result.resumen, result.resumen
     assert llm.count("form_reader") == 2
     assert llm.count("reader") == 0
     downs = [e for e in server.key_events if e[0] == 1]
