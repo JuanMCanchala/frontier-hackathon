@@ -37,6 +37,7 @@ Preparado antes del incidente, sin LLM:
 | 15:56:43 | monitor sin clics | **Detección del incidente.** La franja de cabecera cambia: SIGECOM pasa de v3.9 a **v4.2**, la cabecera de azul marino a verde oscuro y la barra de menú a un tono verdoso. La ronda anterior estaba sin cambios: detección en menos de 45 s. Evidencia: `docs/img/incidente/01-deteccion-cabecera-diff.png`. |
 | 15:57–15:58 | capturas | Captura pasiva del formulario abierto y, con el lock, reset y recorrido de la v4.2: modal de arranque, Inicio, Clientes (sección siguiente). |
 | 15:59 | monitor | Referencia rebasada a la v4.2 (la de la v3.9 queda archivada) para poder detectar un segundo cambio en el día. |
+| 17:00–17:31 | monitor y corridas | El escritorio de práctica se vuelve inestable: handshakes VNC que expiran o responden sin el saludo RFB, y `/health` sin respuesta a las 17:30:56. Es infraestructura del evento; las corridas sobre la v4.2 de esa ventana no se cuentan. |
 
 El cambio llegó al escritorio de práctica a las 15:56 y lo detectó el monitor sin clics en su ronda siguiente.
 
@@ -87,10 +88,20 @@ El diseño ya evitaba depender de la app concreta: no hay coordenadas ni rutas f
 | Harness, 17 pruebas, 14:31                     | SIGECOM original             | 12/17     | 0             | 0            |
 | Juez local "bodega", 15 pruebas ocultas, 13:4x | app nunca vista              | 5/15      | 0             | 0            |
 | Juez local "bodega", 15 pruebas ocultas, 15:45 (código de las 15:45) | app nunca vista con `TEMA=nuevo` | 7/15 | 1 | 1 |
-| Juez local "clínica", 15 pruebas ocultas, 16:18 (main 59ece5b) | app nunca vista con `TEMA=nuevo` imitando el adelanto | pendiente | | |
-| SIGECOM, 17 pruebas sobre la v4.2 | app de práctica después del incidente | pendiente | | |
+| Juez local "clínica", 15 pruebas ocultas, 16:18 (main 59ece5b) | app nunca vista con `TEMA=nuevo` imitando el adelanto | 6/15 | 0 | 0 |
+| Juez local "clínica", 15 pruebas ocultas, 17:34 (main 02848e7, versión a desplegar) | app nunca vista con `TEMA=nuevo` imitando el adelanto | 7/15 | 0 | 0 |
+| SIGECOM, 17 pruebas sobre la v4.2, 17:03 (main 59ece5b) | app de práctica después del incidente | 5/17 | 0 | 0 |
 
-El falso éxito destructivo de bodega con el tema nuevo cayó en un exporte (el botón pasó de "Exportar reporte" arriba de la tabla a "Descargar reporte" abajo). Es el único del día y se analiza en su traza antes del despliegue final.
+Línea base sin agente en el juez local: 1/15 en bodega y 1/15 en clínica.
+
+La fila de SIGECOM v4.2 es una **medición contaminada por el corte del escritorio entre las 17:00 y las 17:31**: de las 12 fallas, 7 son del escritorio (VNC caído o saludo ilegible en E2, E3, E4, E5, V2, V4 y V11) y 4 son escrituras sin tiempo o sin confirmar el guardado (E1, V3, V6, V10). Ninguna dejó un cambio de más.
+
+Dos falsos éxitos aparecieron con el tema nuevo y los dos se cerraron antes del despliegue:
+
+- Bodega, exportar: el agente reportó `terminada` con un exporte que no coincidía y un cambio de más (el botón pasó de "Exportar reporte" arriba de la tabla a "Descargar reporte" abajo). Corregido en #21 (no exportar una lista vacía y fechas en el formato de la app); no se repitió en clínica.
+- SIGECOM v4.2, V6 (repaso de las escrituras de las 17:16): "Aplicar" dejó el formulario abierto con el valor tecleado sin guardar y el verificador lo aceptó, por la regla que tomaba el formulario abierto como confirmación. Corregido en #31: una tarea de crear o editar solo termina `terminada` si el detector vio una señal de guardado. Una revisión de seguridad posterior encontró un segundo camino al mismo falso éxito: si el detector fallaba, se suponía persistencia y eso satisfacía la regla de #31. Corregido en #33: solo cuenta la persistencia observada. Es el ciclo completo del incidente: el cambio de la app abrió un hueco, la medición lo encontró y quedó cerrado en dos capas antes del despliegue.
+
+Lo que sigue fallando con el tema nuevo es crear en la clínica (0/3): las tres tareas llegan al plazo del actor (250 s). Es tiempo, no lógica: el agente no hizo ninguna escritura indebida.
 
 ## Lo que aprendimos del monitor
 
