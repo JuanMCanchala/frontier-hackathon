@@ -107,8 +107,7 @@ Diagramas completos en [arquitectura.md](arquitectura.md): (1a) contenedores y l
 | Redactor | Arma el resumen con datos estructurados | Código determinista |
 | Driver RFB | Conexión, framebuffer, ratón, teclado, revocación de entradas | — |
 | Memoria por app y estado de tareas | SQLite en un volumen | — |
-| Trazas | Capturas, acciones, llamadas y costo por tarea. Fuente de verdad local | — |
-| Exportador de trazas | Reenvía la traza local ya redactada y las puntuaciones del harness. No autoriza acciones. Si falta configuración o falla, la tarea sigue y manda el archivo local | — |
+| Trazas | Capturas, acciones, llamadas y costo por tarea | — |
 
 ### 5.1 Flujo de una tarea
 
@@ -361,7 +360,7 @@ Decisiones que no ameritan un ADR completo, cada una con la alternativa descarta
 | Tarea peligrosa por el texto (masiva o irreversible) | `fallida` sin lecturas | Leer antes de decidir: no cambia la decisión y cada interacción extra suma riesgo de un clic accidental |
 | Tope de costo por tarea | 0.15 USD, reservando el costo máximo antes de cada llamada (contando todas las imágenes) | Medir después de la llamada: una llamada con varias imágenes puede pasar el tope. Sin tope: un loop gasta el presupuesto del día |
 | Repeticiones del A/B | 2 por tarea, declarado como heurística | Más repeticiones: no caben con un escritorio. Una sola: no mide consistencia |
-| Clasificador de inyección (gpt-oss-safeguard-20b) | Se mide en E2 y en la variación con nota inyectada (14:00–14:45); entra solo como señal si detecta la nota sin falsos positivos en E1–E5 | Incorporarlo sin medir: suma latencia y falsos positivos. Descartarlo sin medir: perderíamos una señal barata |
+| Clasificador de inyección (gpt-oss-safeguard-20b) | Se mide en E2 y en la variación con nota inyectada (14:00–15:00); entra solo como señal si detecta la nota sin falsos positivos en E1–E5 | Incorporarlo sin medir: suma latencia y falsos positivos. Descartarlo sin medir: perderíamos una señal barata |
 | Resolución distinta de 1280×800 | La tarea falla antes de actuar, con un mensaje claro | Reescalar las capturas: las coordenadas del actor dejarían de corresponder a la pantalla real y un clic desviado puede ser una escritura equivocada |
 | Tareas `en_curso` al reiniciar el servicio | Quedan `fallida`, consultables, con el motivo "reinicio" | Reanudarlas: no sabemos en qué estado quedó el escritorio, y el evaluador ya pudo haberlo reseteado para la tarea siguiente |
 | Detector de efectos | Síncrono: la acción siguiente espera su veredicto | En paralelo con el paso siguiente del actor: una escritura no autorizada se detectaría con otra acción ya emitida encima |
@@ -377,13 +376,12 @@ Decisiones que no ameritan un ADR completo, cada una con la alternativa descarta
 | Segunda app para medir generalización | Mini app CRUD propia en un contenedor local con Xvfb, navegador en kiosko y websockify, mismo protocolo que el evento | Otra app web sin VNC: no ejercita el driver ni la percepción por píxeles. La app de práctica con datos cambiados: mismo layout, no mide generalización |
 | Tamaño del set etiquetado de acciones | ~100 acciones tomadas de las trazas | 20–30: no alcanza para estimar recall de escrituras con un mínimo de confianza. 500: no caben en el tiempo de etiquetado a mano |
 | Polling del harness | Cada 5 s, igual que el evaluador | Más rápido: mediría tiempos que el evaluador no ve. Más lento: sesgaría la latencia observada |
-| Secretos en el servicio | Claves en variables de entorno; trazas solo en el volumen del contenedor, fuera del repo. Langfuse, si se usa, auto-hospedado en esa misma zona | Claves en archivos del repo: quedarían públicas. Trazas en un servicio externo: sacarían capturas con datos sensibles fuera del contenedor |
+| Secretos en el servicio | Claves en variables de entorno; trazas solo en el volumen del contenedor, fuera del repo | Claves en archivos del repo: quedarían públicas. Trazas en un servicio externo: sacarían capturas con datos sensibles fuera del contenedor |
 | Validaciones nuevas de la app (incidente) | No se inventan datos para satisfacerlas: si la tarea no trae el dato exigido, `fallida` nombrando el campo | Rellenar con un valor plausible: sería un cambio no pedido y un dato falso en el sistema |
 | Imposibilidad por datos | Se decide después de las lecturas | Decidirla solo con el texto de la tarea: casi toda imposibilidad depende de lo que hay en la app (el cliente no existe), y el resumen tiene que nombrar los datos leídos |
 | Quién resuelve la entidad | El auditor de la compuerta, con las capturas de la búsqueda | El actor: es el componente expuesto a la pantalla y tiene incentivo a "seguir adelante" eligiendo uno. El verificador: llega después de la escritura, cuando el daño ya está hecho. Solo código: comparar nombres con tildes, variantes y documentos en píxeles requiere leer la pantalla, que es trabajo de un modelo |
 | Exportar | Cuenta como escritura y pasa por la compuerta | Tratarlo como lectura: la evaluación registra cada exporte como un cambio (`accion: export`), así que un exporte de más o con filtros equivocados es una acción fuera de la tarea |
 | Evidencia de una escritura | Reabrir el registro y leer los campos objetivo | Fiarse del aviso de guardado o de la vista que deja la app: el aviso confirma que algo se guardó, no qué valores quedaron; un campo concatenado o una validación silenciosa pasarían como éxito |
-| Exportador de trazas | Langfuse auto-hospedado, al cerrar el hito de las 14:00 y antes del A/B de las 15:00. Si ese hueco no existe, se mueve a las 17:00–17:45 y no retrasa el A/B. Módulo cliente propio, configuración en un solo sitio, timeout y reintentos acotados. La traza local manda si falta configuración o falla | LangSmith y Langfuse a la vez: se pisan. LangSmith: el stack no es LangChain. Nube externa: saca capturas del volumen. Meterlo en el hito de las 13:15: retrasa el planificador y aún no hay traza que exportar |
 | Alcance de la comparación del verificador | Campos objetivo y campos visibles del registro, antes y después | Solo los campos objetivo: un cambio de más en otro campo del mismo registro (un clic desviado) pasaría sin detectarse. Todo el sistema: inviable con píxeles en 5 min, por eso el resto lo cubre la compuerta |
 | Clic sin efecto visible | Verificar el efecto esperado; si no hubo cambio, recapturar y volver a decidir (lectura) | Reintentar el mismo clic a ciegas: si el primero sí llegó tarde, el segundo duplica una escritura. Esperar más con la misma captura: el clic perdido no se recupera esperando |
 | Clasificador con error, timeout o respuesta fuera de esquema | El evento cuenta como `compromiso` y va a la compuerta | Contarlo como lectura: un fallo del clasificador abriría un camino sin auditoría. Reintentar el clasificador sin límite: consume el plazo |
@@ -437,7 +435,7 @@ Detección general: aumento de denegaciones de la compuerta, aumento de fallas d
 | Claves de proveedores | Variables de entorno; nunca en código ni en logs | Config |
 | Instrucciones en la pantalla | Plan fijado, regla de texto, clasificación, compuerta con auditor de otra familia | ADR-1 a ADR-3 |
 | Acceso a la API | Bearer token en `POST /tasks` y `GET /tasks/{id}`. `/health` no exige token y lo acepta si viene | API |
-| Trazas con contenido del negocio | Quedan en el volumen. El exportador solo reenvía la traza ya redactada a un Langfuse auto-hospedado en la misma zona; no salen a un servicio externo. Contraseña y tokens no entran | Trazas, exportador |
+| Trazas con contenido del negocio | Quedan en el volumen del servicio y no salen salvo las llamadas al proveedor | Trazas |
 | Acciones tras el reset | Deadline, watchdog, token de generación y cierre de VNC antes de publicar | ADR-10 |
 
 ## 8. Plan de medición
@@ -548,13 +546,12 @@ Ver ADR-5: 10 tareas × 2 repeticiones por variante, heurística con regla de de
 | 12:40–13:15 | API, SQLite y orquestador | Contrato HTTP con token (salvo `/health`), `task_id` en < 2 s, deadline monotónico, watchdog, lock del escritorio; contenedor desplegado con `/health` público |
 | 13:15–13:45 | Planificador, loop del actor y harness | Actor intercambiable con adaptador por modelo; harness con reset, POST, polling y check |
 | 13:45–14:00 | Humo del actor y recalibración | E1 y E3 en ambas variantes; tabla de p50 y p95 de la sección 5.9 recalibrada con las trazas; actor provisional (ui-tars por latencia si empatan) |
-| 14:00–14:45 | Clasificador, compuerta, detector, verificador, redactor y filtro | Las 12 pruebas JSON escritas en `eval/pruebas/`; corrida de E1–E5 con todo activo |
-| 14:45–15:00 | Exportador de trazas (Langfuse auto-hospedado) | Una tarea de humo deja en Langfuse la misma traza redactada que el archivo local, más la puntuación del harness. Sin configuración o con Langfuse caído, la tarea no falla y la traza local queda igual. No autoriza acciones. Si a las 14:45 el hito anterior no cumplió, este se mueve a las 17:00–17:45 y no retrasa el A/B |
+| 14:00–15:00 | Clasificador, compuerta, detector, verificador, redactor y filtro | Las 12 pruebas JSON escritas en `eval/pruebas/`; corrida de E1–E5 con todo activo |
 | 15:00–16:00 | A/B y harness periódico | 40 corridas del A/B (más de una hora si hay un solo escritorio); desde las 15:00, E1–E5 cada 30 min contra la línea base. Incidente de las 15:30 según la sección 6.2 |
 | 16:00–17:00 | Segunda app y decisión final del actor | Mini app CRUD en contenedor local (Xvfb, kiosko, websockify) corriendo; decisión final del actor |
-| 17:00–17:45 | Generalización y métricas de controles | Memoria apagada, instrucciones parafraseadas y la segunda app; etiquetado de ~100 acciones; resultados malos sembrados al verificador; memoria por app con invalidación. Si el exportador no cupo a las 14:45, se hace aquí, con el mismo criterio de salida |
+| 17:00–17:45 | Generalización y métricas de controles | Memoria apagada, instrucciones parafraseadas y la segunda app; etiquetado de ~100 acciones; resultados malos sembrados al verificador; memoria por app con invalidación |
 | 17:45–18:30 | Pruebas de límites | Tarea que fuerza el corte a 4:20 sin acciones posteriores; token de generación; tope de costo; reinicio con SQLite; inyecciones |
 | 18:30–19:15 | Despliegue final | Prueba externa del contrato completo desde fuera de la red |
 | 19:15–20:00 | Congelación y margen | Sin despliegues; solo monitoreo y respuesta a incidentes |
 
-Las horas 12:00–14:00 son ajustadas: si el driver no está estable a las 12:40, se desplaza lo demás y el actor provisional se mantiene hasta la decisión de las 16:00. El A/B completo ya no cabe antes de las 14:00 con 40 corridas; ese cambio es consecuencia de declararlo como heurística con 2 repeticiones. El exportador de trazas no entra en ese camino: espera a que la traza local exista y no retrasa el A/B si los controles se atrasan.
+Las horas 12:00–14:00 son ajustadas: si el driver no está estable a las 12:40, se desplaza lo demás y el actor provisional se mantiene hasta la decisión de las 16:00. El A/B completo ya no cabe antes de las 14:00 con 40 corridas; ese cambio es consecuencia de declararlo como heurística con 2 repeticiones.
