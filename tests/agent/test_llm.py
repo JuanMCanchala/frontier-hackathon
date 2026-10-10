@@ -4,10 +4,17 @@ import time
 import httpx
 import pytest
 from PIL import Image
+from pydantic import BaseModel
 
 from aprendiz.agent.budget import Budget, BudgetExceeded
 from aprendiz.agent.config import AgentSettings
-from aprendiz.agent.llm import DeadlineExceeded, LlmError, ModerationBlocked, OpenRouterClient
+from aprendiz.agent.llm import (
+    SCHEMA_REJECTED,
+    DeadlineExceeded,
+    LlmError,
+    ModerationBlocked,
+    OpenRouterClient,
+)
 from aprendiz.config import Settings
 
 KEY = "sk-or-secret-key-1234"
@@ -163,3 +170,63 @@ async def test_call_is_refused_when_less_than_the_minimum_time_is_left():
     with pytest.raises(DeadlineExceeded):
         await client.chat("m", MSGS, deadline=time.monotonic() + 3)
     assert budget.reserved == 0 and budget.spent == 0
+
+
+class _Shape(BaseModel):
+    nombre: str
+    edad: int | None = None
+    etiquetas: list[str] = []
+
+
+@pytest.fixture(autouse=True)
+def _clear_schema_memory():
+    SCHEMA_REJECTED.clear()
+    yield
+    SCHEMA_REJECTED.clear()
+
+
+async def test_json_schema_is_sent_to_models_that_support_it():
+    seen = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(json.loads(request.content)["response_format"])
+        return httpx.Response(200, json=OK)
+
+    client, _ = make(handler)
+    await client.chat("anthropic/claude-haiku-5.5", MSGS, json_mode=True, schema=_Shape)
+    await client.chat("some/other-model", MSGS, json_mode=True, schema=_Shape)
+    first, second = seen
+    assert first["type"] == "json_schema"
+    spec = first["json_schema"]
+    assert spec["name"] == "_Shape" and spec["strict"] is True
+    assert spec["schema"]["additionalProperties"] is False
+    assert spec["schema"]["required"] == ["nombre", "edad", "etiquetas"]
+    assert "default" not in json.dumps(spec["schema"])
+    assert second == {"type": "json_object"}
+
+
+async def test_400_on_the_schema_falls_back_to_json_object_and_is_remembered():
+    formats = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        fmt = json.loads(request.content)["response_format"]["type"]
+        formats.append(fmt)
+        if fmt == "json_schema":
+            return httpx.Response(400, json={"error": "bad schema"})
+        return httpx.Response(200, json=OK)
+
+    client, budget = make(handler)
+    model = "openai/gpt-6.1-sol"
+    assert (await client.chat(model, MSGS, json_mode=True, schema=_Shape)).text == "hola"
+    assert formats == ["json_schema", "json_object"]
+    assert (model, "_Shape") in SCHEMA_REJECTED
+    await client.chat(model, MSGS, json_mode=True, schema=_Shape)
+    assert formats == ["json_schema", "json_object", "json_object"]  # remembered, no new probe
+    assert budget.reserved == 0
+
+
+async def test_a_400_that_is_not_about_the_schema_is_not_remembered():
+    client, _ = make(lambda _r: httpx.Response(400, json={"error": "bad"}))
+    with pytest.raises(LlmError):
+        await client.chat("anthropic/claude-haiku-5.5", MSGS, json_mode=True, schema=_Shape)
+    assert not SCHEMA_REJECTED
