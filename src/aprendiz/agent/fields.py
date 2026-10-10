@@ -86,10 +86,10 @@ async def read_form_values(
     model: str,
     fallback: str | None = None,
     deadline: float | None = None,
-) -> dict[str, str | None]:
+) -> dict[str, str | None] | None:
     """One call for the whole form: {label: text read}. The expected values are deliberately
-    not shown to the reader, so it cannot just confirm them. On failure every field reads as
-    None, which makes the caller rewrite and re-check them."""
+    not shown to the reader, so it cannot just confirm them. None if the read itself failed:
+    unknown, not different."""
     listing = "\n".join(f"- {label} at ({x}, {y})" for label, (x, y) in fields)
     messages: list[Message] = [
         {"role": "system", "content": FORM_READER_SYSTEM_PROMPT},
@@ -107,8 +107,9 @@ async def read_form_values(
             deadline=deadline,
         )
     except (LlmError, InvalidReply) as exc:
+        # Unknown is not "different": the caller must not rewrite fields over a failed read.
         log.warning("form re-read failed", extra={"error": str(exc)})
-        return {label: None for label, _ in fields}
+        return None
     by_label = {fold(r.etiqueta): r.valor for r in reply.campos}
     return {label: by_label.get(fold(label)) for label, _ in fields}
 

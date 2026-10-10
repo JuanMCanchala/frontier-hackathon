@@ -258,8 +258,10 @@ class AgentRunner:
         # After a timeout there is no navigation: verify with what is on screen now.
         navigate = fin == "done" and plan.tipo != "preguntar"
         if plan.tipo in _WRITE_TYPES and trace.writes_authorized == 0:
+            # The actor's notes usually say why (an existing record and its code): keep them.
+            notes = [f"notas del actor: {episode.memo}"] if episode.memo else []
             return Finish.failed(
-                fin, "el actor declaró terminar sin que se autorizara ninguna escritura"
+                fin, "el actor declaró terminar sin que se autorizara ninguna escritura", notes
             )
         if time.monotonic() >= ctx.deadline - self._agent.VERIFY_RESERVE_S:
             return Finish.failed(fin, "no quedó tiempo para verificar el resultado")
