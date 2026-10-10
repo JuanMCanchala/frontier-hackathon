@@ -60,6 +60,7 @@ _CONTINUITY_ACTIONS = {"create", "update"}
 
 
 _EDIT_KEYS = {"ctrl+a", "backspace", "delete"}
+LATE_LOOK_S = 1.0  # extra wait before re-reading a screen that did not change after a click
 VIEW_CHANGE = 0.15  # share of the screen a navigation must repaint to count as a new view
 
 
@@ -290,6 +291,19 @@ class Episode:
             and self.plan.tipo == "preguntar"
             and self.plan.consulta is not None
         )
+
+    async def _late_look(self, before: Image.Image, after: Image.Image) -> tuple[Image.Image, bool]:
+        """A view that goes to the server can repaint after the stability wait: the v4.2 theme
+        showed "Sin resultados" a moment after the filter click, the step read "no change", the
+        search was not kept as evidence and the create was denied as unsearched. Look once more
+        before concluding a navigation or filter click did nothing."""
+        if self._time_left() < 2 * self.agent.MIN_CALL_S:
+            return after, False
+        await asyncio.sleep(LATE_LOOK_S)
+        late = await self._snap()
+        if changed_fraction(before, late)[0] > NOISE_PIXELS:
+            return late, True
+        return after, False
 
     async def _answer_from_table(self) -> Action:
         """Walk the table from its first page, transcribe each page, and let code count or add.
@@ -731,6 +745,8 @@ class Episode:
         else:
             await self._emit(action)
         after, changed = await self._after(action, shot, clase, verdict is not None, rec)
+        if not changed and clase in ("navegacion", "busqueda_filtro") and action.tipo != "hover":
+            after, changed = await self._late_look(shot, after)
         self._record_outcome(action, clase, point, verdict, shot, after, changed)
         if verdict is not None and clase == "compromiso" and self._last_effect_persisted:
             self._count_persisted_write(rec)
