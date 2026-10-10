@@ -22,6 +22,7 @@ from typing import Any
 import httpx
 
 from aprendiz.redact import redact
+from eval.desktop_lock import DesktopBusy, DesktopLock
 from eval.report import Resultado, RunReport, render
 from eval.schema import LoadedTest, load_dir
 from eval.scoring import categoria, evaluate, verdict
@@ -29,6 +30,7 @@ from eval.scoring import categoria, evaluate, verdict
 log = logging.getLogger("eval.harness")
 
 OPENROUTER_KEY_URL = "https://openrouter.ai/api/v1/key"
+LOCK_WAIT_S = 90.0
 RESULTS_DIR = Path(__file__).parent / "resultados"
 
 
@@ -382,7 +384,17 @@ def main(argv: list[str] | None = None) -> int:
     except MissingEnv as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 2
-    return asyncio.run(run(args, tests, env))
+    lock = DesktopLock.from_env()
+    try:
+        # The incident monitor may be mid-round; wait for it instead of colliding.
+        lock.acquire(LOCK_WAIT_S)
+    except DesktopBusy as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 2
+    try:
+        return asyncio.run(run(args, tests, env))
+    finally:
+        lock.release()
 
 
 if __name__ == "__main__":
