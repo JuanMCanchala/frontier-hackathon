@@ -35,6 +35,9 @@ class VncTimings:
     """
 
     click_hold_s: float = 0.15
+    glide_steps: int = 4  # intermediate pointer moves before a click (0 jumps straight there)
+    glide_step_s: float = 0.02
+    hover_settle_s: float = 0.08  # pause on the target before pressing
     double_click_gap_s: float = 0.08
     key_delay_s: float = 0.02
     non_ascii_delay_s: float = 0.06
