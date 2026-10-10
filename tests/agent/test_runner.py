@@ -1092,3 +1092,24 @@ async def test_create_that_finds_the_record_listed_names_it_in_the_summary(
     )
     result = await make_runner(settings, tmp_path, llm).run(make_ctx(server))
     assert result.estado == "fallida" and "CL-0053" in result.resumen
+
+
+async def test_retrying_the_same_fill_on_the_same_form_does_not_pay_the_auditor_again(
+    server, settings, tmp_path
+):
+    """V10 on v4.2 repeated one fill seven times and spent its budget on the auditor."""
+    allow = json.dumps({"escritura": "create", "decision": "permitir", "motivo": "ok"})
+    campos = [{"x": 100, "y": 100, "etiqueta": "Nombre", "valor": "Papelería Los Andes"}]
+    again = [{"x": 101, "y": 100, "etiqueta": "Nombre", "valor": "Papelería Los Andes"}]
+    llm = question_llm(
+        planner=[CREATE_PLAN],
+        actor=[
+            act(tipo="fill_form", campos=campos),
+            act(tipo="fill_form", campos=again),
+            act(tipo="fail", motivo="x", datos_motivo=[]),
+        ],
+        classifier=[json.dumps({"clase": "compromiso"})],
+        auditor=[allow],
+    )
+    await make_runner(settings, tmp_path, llm).run(make_ctx(server))
+    assert llm.count("auditor") == 1
