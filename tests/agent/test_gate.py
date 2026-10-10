@@ -47,6 +47,11 @@ async def test_allowed_update_sends_all_images():
     assert llm.calls[0]["model"] == "aud"
 
 
+async def test_typing_the_entity_name_is_allowed_as_a_search():
+    verdict = await run(FakeLlm([]), accion=Action(tipo="type", texto="Ana Pérez"))
+    assert verdict.decision == "permitir"
+
+
 async def test_plan_without_writes_denies_without_calling_model():
     llm = FakeLlm([])
     verdict = await run(llm, plan=Plan(tipo="preguntar", entidad="Ana"))

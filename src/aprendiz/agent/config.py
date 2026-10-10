@@ -62,3 +62,7 @@ class AgentSettings(BaseSettings):
     CLOSE_TIMEOUT_S: float = 2.0
     VERIFIER_MAX_EVIDENCE_SHOTS: int = 4
     TRACE_SHOT_SIZE: tuple[int, int] = (640, 400)
+    # Hints must stay short: the screenshot is the source of truth, not a long replay.
+    MEMORY_MAX_ROUTES: int = 4
+    MEMORY_MAX_PROCEDURES: int = 3
+    MEMORY_HINT_CHARS: int = 80

@@ -3,6 +3,7 @@
 from aprendiz.agent.llm import Llm, Message
 from aprendiz.agent.schemas import Plan
 from aprendiz.agent.structured import InvalidReply, ask_json
+from aprendiz.agent.textmatch import fold
 
 PLANNER_SYSTEM_PROMPT = """\
 You plan tasks for an agent that operates a desktop business app through its screen.
@@ -21,8 +22,10 @@ You only see the task text. Reply with ONE JSON object and nothing else, with ex
 }
 
 Rules:
-- "entidad": the entity exactly as written in the task (same spelling, accents, case);
-  null if none.
+- "entidad": the record to find or create, copied exactly from the task (same spelling,
+  accents, case). Required for "crear" and "editar". It is who the search must locate, not
+  the new field value: an edit that changes an address keeps the client's name in "entidad"
+  and the new address only in "campos". null only when the task names no record.
 - "escrituras_permitidas": every write the task asks for and nothing else. Empty for "preguntar".
   Reading, searching and filtering are never writes. Exporting is a write with accion "export".
 - Field values come only from the task text. Never invent or fill in data the task does not give.
@@ -45,6 +48,43 @@ class PlanError(Exception):
     """The planner could not produce a valid plan."""
 
 
+_FIND = ("crear", "editar")
+_WRITE = ("create", "update", "delete")
+
+
+def entity_problem(plan: Plan, tarea: str) -> str | None:
+    """Why this plan cannot be searched, or None.
+
+    The gate allows typing ``entidad`` into a field a classifier misread as a record. If the
+    planner leaves it empty, or puts the replacement value there, the search of the named
+    record is denied and the actor stops.
+    """
+    if plan.tipo not in _FIND:
+        return None
+    writes = [w for w in plan.escrituras_permitidas if w.accion in _WRITE]
+    if not writes:
+        return None
+    name = (plan.entidad or "").strip()
+    if not name or fold(name) not in fold(tarea):
+        return (
+            "entidad is required for this task: copy the record to find or create exactly "
+            "as written in the task. It is not the new field value."
+        )
+    if plan.tipo == "editar":
+        written = {
+            fold(value)
+            for write in writes
+            for value in write.campos.values()
+            if value not in plan.parametros
+        }
+        if fold(name) in written:
+            return (
+                "entidad must be the record to find, copied from the task, "
+                "not the replacement value you will write."
+            )
+    return None
+
+
 async def plan_from_task(
     llm: Llm, tarea: str, *, model: str, deadline: float | None = None
 ) -> Plan:
@@ -53,6 +93,19 @@ async def plan_from_task(
         {"role": "user", "content": f"Task:\n{tarea}"},
     ]
     try:
-        return await ask_json(llm, model, messages, Plan, max_tokens=800, deadline=deadline)
+        plan = await ask_json(llm, model, messages, Plan, max_tokens=800, deadline=deadline)
+        problem = entity_problem(plan, tarea)
+        if problem is None:
+            return plan
+        messages = [
+            *messages,
+            {"role": "assistant", "content": plan.model_dump_json()},
+            {"role": "user", "content": problem},
+        ]
+        plan = await ask_json(llm, model, messages, Plan, max_tokens=800, deadline=deadline)
     except InvalidReply as exc:
         raise PlanError(str(exc)) from exc
+    problem = entity_problem(plan, tarea)
+    if problem is not None:
+        raise PlanError(problem)
+    return plan

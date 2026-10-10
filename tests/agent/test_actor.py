@@ -1,7 +1,7 @@
 import pytest
 from PIL import Image
 
-from aprendiz.agent.actor import ActorContext, PixelJsonActor, UiTarsActor
+from aprendiz.agent.actor import ActorContext, PixelJsonActor, UiTarsActor, _format_context
 from aprendiz.agent.config import AgentSettings
 from aprendiz.agent.schemas import Plan
 from aprendiz.config import Settings
@@ -33,6 +33,17 @@ async def test_invalid_action_is_reasked_once():
     llm = FakeLlm(['{"tipo": "click", "x": [283, 49], "y": 49}', '{"tipo": "wait"}'])
     action = await PixelJsonActor(llm, SETTINGS, AgentSettings()).next_action(SHOT, ctx())
     assert action.tipo == "wait" and len(llm.calls) == 2
+
+
+def test_hints_are_cautions_and_only_in_execution():
+    shown = _format_context(ctx(pistas=("Clientes > Listado",)), 8)
+    assert "Clientes > Listado" in shown
+    assert "screenshot wins" in shown
+    assert "do not replay a sequence" in shown
+    assert "do not reuse coordinates" in shown
+    hidden = _format_context(ctx(pistas=("Clientes > Listado",), modo="verificacion"), 8)
+    assert "Clientes" not in hidden
+    assert "Hints" not in _format_context(ctx(), 8)
 
 
 async def test_ui_tars_is_not_implemented():

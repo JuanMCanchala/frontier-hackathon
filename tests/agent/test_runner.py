@@ -1,16 +1,21 @@
 import asyncio
 import json
+import logging
 import time
 from pathlib import Path
 
 import pytest
+from PIL import Image
 
 from aprendiz.agent.budget import BudgetExceeded
 from aprendiz.agent.config import AgentSettings
+from aprendiz.agent.episode import Episode
+from aprendiz.agent.identity import screen_dhash
+from aprendiz.agent.memory import AppIdentity, AppMemory
 from aprendiz.agent.runner import AgentRunner
 from aprendiz.config import Settings, VncTimings
 from aprendiz.models import Escritorio, RunContext
-from aprendiz.vnc import Lease
+from aprendiz.vnc import Lease, VncError
 from tests.agent.fakes import RoutedLlm, act, plan_json
 from tests.fake_server import PASSWORD, FakeRfbServer
 
@@ -23,6 +28,8 @@ FAST = VncTimings(
 )
 NAV = json.dumps({"clase": "navegacion"})
 FIELD = json.dumps({"clase": "campo_registro"})
+SEARCH = json.dumps({"clase": "busqueda_filtro"})
+SEARCH_CLICK = act(tipo="click", x=20, y=20)
 NO_EFFECT = json.dumps({"persisted": False, "signal": ""})
 VERIFIED = json.dumps(
     {
@@ -54,6 +61,9 @@ def settings(tmp_path: Path) -> Settings:
         TRACES_DIR=str(tmp_path / "traces"),
         PLANNER_MODEL="planner-model",
         ACTOR_MODEL="actor-model",
+        # Off, and not the service file: this suite must not open data/app_memory.sqlite3.
+        APP_MEMORY_DB=str(tmp_path / "app_memory.sqlite3"),
+        MEMORY_ENABLED=False,
     )
 
 
@@ -204,12 +214,19 @@ async def test_budget_exhausted_is_fallida(server, settings, tmp_path):
 
 EDIT_PLAN = plan_json(
     tipo="editar",
-    entidad=None,
+    entidad="facturas",
     escrituras_permitidas=[
         {"entidad": "Cliente", "accion": "update", "campos": {"telefono": "555-1"}}
     ],
     dato_pedido=[],
 )
+
+
+def pressed_points(server: FakeRfbServer) -> set[tuple[int, int]]:
+    pressed = {
+        (event[1][1:3], event[1][3:5]) for event in server.pointer_events if event[1][0] == 1
+    }
+    return {(int.from_bytes(x, "big"), int.from_bytes(y, "big")) for x, y in pressed}
 
 
 async def test_gate_final_denial_ends_with_the_distinguishing_data(server, settings, tmp_path):
@@ -226,16 +243,19 @@ async def test_gate_final_denial_ends_with_the_distinguishing_data(server, setti
     )
     llm = question_llm(
         planner=[EDIT_PLAN],
-        actor=[act(tipo="click", x=300, y=300)],
-        classifier=[json.dumps({"clase": "compromiso"})],
+        actor=[SEARCH_CLICK, act(tipo="click", x=300, y=300)],
+        # Two votes per classification; the last reply then repeats.
+        classifier=[SEARCH, SEARCH, json.dumps({"clase": "compromiso"})],
         auditor=[two],
     )
-    result = await make_runner(settings, tmp_path, llm).run(make_ctx(server))
+    result = await run_painted(server, settings, tmp_path, llm)
     assert result.estado == "fallida"
     assert "documento 111" in result.resumen and "documento 222" in result.resumen
     data = summary_json(settings)
     assert data["escrituras_denegadas"] == 1 and data["escrituras_autorizadas"] == 0
-    assert server.pointer_events == []  # nothing was clicked
+    pressed = pressed_points(server)
+    assert (20, 20) in pressed  # the search ran
+    assert (300, 300) not in pressed  # the denied write was not clicked
 
 
 async def paint_on_pointer(server: FakeRfbServer, stop: asyncio.Event) -> None:
@@ -270,7 +290,7 @@ async def test_form_fill_is_authorized_once_clicks_each_field_and_never_uses_tab
 ):
     plan = plan_json(
         tipo="crear",
-        entidad=None,
+        entidad="facturas",
         escrituras_permitidas=[
             {"entidad": "Cliente", "accion": "create", "campos": {"nombre": "Ana"}}
         ],
@@ -331,6 +351,8 @@ async def test_correctable_denial_reaches_the_actor_and_repeats_end_the_task(
 
     def actor(messages) -> str:
         seen_notes.append(messages[-1]["content"])
+        if len(seen_notes) == 1:
+            return SEARCH_CLICK
         return act(tipo="click", x=300, y=300)
 
     deny = json.dumps(
@@ -339,19 +361,21 @@ async def test_correctable_denial_reaches_the_actor_and_repeats_end_the_task(
     llm = question_llm(
         planner=[EDIT_PLAN],
         actor=actor,
-        classifier=[json.dumps({"clase": "compromiso"})],
+        classifier=[SEARCH, SEARCH, json.dumps({"clase": "compromiso"})],
         auditor=[deny],
     )
-    result = await make_runner(settings, tmp_path, llm).run(make_ctx(server))
+    result = await run_painted(server, settings, tmp_path, llm)
     assert result.estado == "fallida" and "wrong field" in result.resumen
     assert llm.count("auditor") == 3  # two corrections allowed, the third denial is final
-    assert "Note: Denied: wrong field" in seen_notes[1]
-    assert server.pointer_events == []
+    assert "Note: Denied: wrong field" in seen_notes[2]
+    pressed = pressed_points(server)
+    assert (20, 20) in pressed
+    assert (300, 300) not in pressed
 
 
 CREATE_PLAN = plan_json(
     tipo="crear",
-    entidad=None,
+    entidad="facturas",
     escrituras_permitidas=[
         {
             "entidad": "Cliente",
@@ -434,7 +458,7 @@ async def test_text_rule_denial_tells_the_actor_the_exact_value(server, settings
 
 SAVE_PLAN = plan_json(
     tipo="crear",
-    entidad=None,
+    entidad="facturas",
     escrituras_permitidas=[{"entidad": "Cliente", "accion": "create", "campos": {"nombre": "Ana"}}],
     dato_pedido=[],
 )
@@ -512,14 +536,26 @@ async def test_save_after_an_authorized_fill_is_authorized_by_continuity_and_end
 
 
 async def test_save_is_audited_when_the_form_changed_since_the_fill(server, settings, tmp_path):
-    llm = save_llm([FILL, act(tipo="click", x=300, y=430), SAVE, act(tipo="done")])
-    llm._scripts["classifier"] = [FIELD, FIELD, FIELD, FIELD, json.dumps({"clase": "compromiso"})]
+    llm = save_llm([SEARCH_CLICK, FILL, act(tipo="click", x=300, y=430), SAVE, act(tipo="done")])
+    llm._scripts["classifier"] = [
+        SEARCH,
+        SEARCH,
+        FIELD,
+        FIELD,
+        FIELD,
+        FIELD,
+        json.dumps({"clase": "compromiso"}),
+    ]
     result = await run_painted(server, settings, tmp_path, llm)
     assert llm.count("auditor") == 2, result.resumen  # screen changed in between: no continuity
 
 
 async def test_save_that_is_not_the_save_button_is_audited(server, settings, tmp_path):
-    llm = save_llm([FILL, SAVE, act(tipo="done")], submit=['{"es_guardar": false}'])
+    llm = save_llm(
+        [SEARCH_CLICK, FILL, SAVE, act(tipo="done")],
+        submit=['{"es_guardar": false}'],
+        classifier=[SEARCH, SEARCH, FIELD, FIELD, json.dumps({"clase": "compromiso"})],
+    )
     await run_painted(server, settings, tmp_path, llm)
     assert llm.count("auditor") == 2
 
@@ -547,7 +583,7 @@ async def test_fill_form_with_a_select_opens_it_and_clicks_the_located_option(
     ]
     plan = plan_json(
         tipo="crear",
-        entidad=None,
+        entidad="facturas",
         escrituras_permitidas=[
             {
                 "entidad": "Cliente",
@@ -618,3 +654,157 @@ async def test_verification_points_the_actor_at_the_target_values_and_keeps_the_
     assert result.estado == "terminada", result.resumen
     assert "Make these target values visible" in notes[-1]
     assert "nombre=Ana" in notes[-1] and "Cliente CL-1 creado" in notes[-1]
+
+
+def memory_settings(tmp_path: Path, *, enabled: bool = True) -> Settings:
+    return Settings(
+        OPENROUTER_API_KEY="sk-or-test-key-0000",
+        TEAM_TOKEN="team-token-test",
+        TRACES_DIR=str(tmp_path / "traces"),
+        PLANNER_MODEL="planner-model",
+        ACTOR_MODEL="actor-model",
+        APP_MEMORY_DB=str(tmp_path / "app_memory.sqlite3"),
+        MEMORY_ENABLED=enabled,
+        _env_file=None,  # type: ignore[call-arg]
+    )
+
+
+async def test_current_hints_reach_the_actor_only_while_executing(server, tmp_path):
+    settings = memory_settings(tmp_path)
+    app = AppIdentity("Facturas 1.2", screen_dhash(Image.new("RGB", (1280, 800))))
+    store = AppMemory(settings.APP_MEMORY_DB)
+    store.save_menu_route(app, ("Clientes", "Listado"))
+    store.save_procedure(app, ("Clientes",), ("click",))
+    store.close()
+    notes: list[str] = []
+
+    def actor(messages) -> str:
+        notes.append(messages[-1]["content"])
+        if len(notes) == 1:
+            return act(tipo="done", respuesta=["1,234"])
+        return act(tipo="done")
+
+    llm = question_llm(identidad=['{"texto": "Facturas 1.2"}'], actor=actor)
+    result = await make_runner(settings, tmp_path, llm).run(make_ctx(server))
+    assert result.estado == "terminada", result.resumen
+    assert "Clientes > Listado" in notes[0]
+    assert "click" in notes[0]
+    assert "screenshot wins" in notes[0]
+    assert "do not replay a sequence" in notes[0]
+    assert "do not reuse coordinates" in notes[0]
+    assert "Clientes" not in notes[1]
+
+
+async def test_sqlite_error_does_not_fail_the_task(server, tmp_path, caplog):
+    settings = memory_settings(tmp_path).model_copy(update={"APP_MEMORY_DB": str(tmp_path)})
+    llm = question_llm(identidad=['{"texto": "Facturas 1.2"}'])
+    with caplog.at_level(logging.WARNING):
+        result = await make_runner(settings, tmp_path, llm).run(make_ctx(server))
+    assert result.estado == "terminada", result.resumen
+    assert "app memory" in caplog.text.lower()
+
+
+def _seed_procedure(settings: Settings) -> str:
+    app = AppIdentity("Facturas 1.2", screen_dhash(Image.new("RGB", (1280, 800))))
+    store = AppMemory(settings.APP_MEMORY_DB)
+    procedure_id = store.save_procedure(app, ("Clientes",), ("click",))
+    store.close()
+    return procedure_id
+
+
+async def test_verified_task_stores_the_navigation_label_and_action_type(server, tmp_path):
+    settings = memory_settings(tmp_path)
+    llm = question_llm(
+        identidad=['{"texto": "Facturas 1.2"}'],
+        actor=[
+            act(tipo="click", x=10, y=20, razon="Clientes"),
+            act(tipo="done", respuesta=["1,234"]),
+            act(tipo="done"),
+        ],
+    )
+    result = await make_runner(settings, tmp_path, llm).run(make_ctx(server))
+    assert result.estado == "terminada", result.resumen
+    store = AppMemory(settings.APP_MEMORY_DB)
+    app = AppIdentity("Facturas 1.2", screen_dhash(Image.new("RGB", (1280, 800))))
+    current = store.list_current(app)
+    store.close()
+    assert [route.labels for route in current.routes] == [("Clientes",)]
+    assert [item.action_types for item in current.procedures] == [("click",)]
+
+
+async def test_failed_verification_invalidates_the_hinted_procedure(server, tmp_path):
+    settings = memory_settings(tmp_path)
+    procedure_id = _seed_procedure(settings)
+    llm = question_llm(
+        identidad=['{"texto": "Facturas 1.2"}'],
+        verifier=[json.dumps({"verificado": False, "observado": [], "no_verificable": ["total"]})],
+    )
+    result = await make_runner(settings, tmp_path, llm).run(make_ctx(server))
+    assert result.estado == "fallida", result.resumen
+    store = AppMemory(settings.APP_MEMORY_DB)
+    listed = store.list_current(
+        AppIdentity("Facturas 1.2", screen_dhash(Image.new("RGB", (1280, 800))))
+    )
+    store.close()
+    assert procedure_id not in {item.procedure_id for item in listed.procedures}
+
+
+async def test_actor_fail_with_hints_invalidates_the_procedure(server, tmp_path):
+    settings = memory_settings(tmp_path)
+    procedure_id = _seed_procedure(settings)
+    llm = question_llm(
+        identidad=['{"texto": "Facturas 1.2"}'],
+        actor=[act(tipo="fail", motivo="no sigue", datos_motivo=[])],
+    )
+    result = await make_runner(settings, tmp_path, llm).run(make_ctx(server))
+    assert result.estado == "fallida"
+    store = AppMemory(settings.APP_MEMORY_DB)
+    listed = store.list_current(
+        AppIdentity("Facturas 1.2", screen_dhash(Image.new("RGB", (1280, 800))))
+    )
+    store.close()
+    assert procedure_id not in {item.procedure_id for item in listed.procedures}
+
+
+async def test_timeout_vnc_and_budget_do_not_invalidate(server, tmp_path, monkeypatch):
+    settings = memory_settings(tmp_path)
+    procedure_id = _seed_procedure(settings)
+    app = AppIdentity("Facturas 1.2", screen_dhash(Image.new("RGB", (1280, 800))))
+
+    async def still_listed() -> None:
+        store = AppMemory(settings.APP_MEMORY_DB)
+        listed = {item.procedure_id for item in store.list_current(app).procedures}
+        store.close()
+        assert procedure_id in listed
+
+    timed = question_llm(identidad=['{"texto": "Facturas 1.2"}'])
+    result = await make_runner(settings, tmp_path, timed).run(make_ctx(server, actor_in=0.1))
+    assert result.estado == "fallida"
+    await still_listed()
+
+    async def drop(self):
+        raise VncError("dropped")
+
+    monkeypatch.setattr(Episode, "run_execution", drop)
+    dropped_llm = question_llm(identidad=['{"texto": "Facturas 1.2"}'])
+    dropped = await make_runner(settings, tmp_path, dropped_llm).run(make_ctx(server))
+    assert dropped.estado == "fallida"
+    await still_listed()
+
+    async def over_budget(self):
+        raise BudgetExceeded("over")
+
+    monkeypatch.setattr(Episode, "run_execution", over_budget)
+    broke_llm = question_llm(identidad=['{"texto": "Facturas 1.2"}'])
+    broke = await make_runner(settings, tmp_path, broke_llm).run(make_ctx(server))
+    assert broke.estado == "fallida"
+    await still_listed()
+
+
+async def test_disabled_memory_does_not_read(server, tmp_path):
+    settings = memory_settings(tmp_path, enabled=False)
+    llm = question_llm()
+    result = await make_runner(settings, tmp_path, llm).run(make_ctx(server))
+    assert result.estado == "terminada", result.resumen
+    assert llm.count("identidad") == 0
+    assert not Path(settings.APP_MEMORY_DB).exists()

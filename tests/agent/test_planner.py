@@ -28,3 +28,64 @@ async def test_schema_violation_retries_then_fails():
     with pytest.raises(PlanError):
         await plan_from_task(llm, "tarea", model="m")
     assert len(llm.calls) == 2
+
+
+def _edit(**overrides) -> str:
+    base = {
+        "tipo": "editar",
+        "entidad": "Ana Pérez",
+        "escrituras_permitidas": [
+            {"entidad": "Cliente", "accion": "update", "campos": {"telefono": "555"}}
+        ],
+        "dato_pedido": [],
+    }
+    return plan_json(**{**base, **overrides})
+
+
+async def test_edit_without_entity_is_sent_back_once():
+    tarea = "Cambia el teléfono de Ana Pérez a 555."
+    llm = FakeLlm([_edit(entidad=None), _edit()])
+    plan = await plan_from_task(llm, tarea, model="m")
+    assert plan.entidad == "Ana Pérez"
+    assert len(llm.calls) == 2
+    assert "entidad is required" in llm.calls[1]["messages"][-1]["content"]
+
+
+async def test_edit_entity_that_is_the_new_value_is_sent_back():
+    tarea = "Corrige la dirección de Ana Pérez: ahora es Calle 1."
+    swapped = _edit(
+        entidad="Calle 1",
+        escrituras_permitidas=[
+            {"entidad": "Cliente", "accion": "update", "campos": {"direccion": "Calle 1"}}
+        ],
+    )
+    llm = FakeLlm([swapped, _edit()])
+    plan = await plan_from_task(llm, tarea, model="m")
+    assert plan.entidad == "Ana Pérez"
+    assert "not the replacement value" in llm.calls[1]["messages"][-1]["content"]
+
+
+async def test_edit_that_still_omits_the_entity_fails():
+    llm = FakeLlm([_edit(entidad=None), _edit(entidad=None)])
+    with pytest.raises(PlanError):
+        await plan_from_task(llm, "Cambia el teléfono de Ana Pérez a 555.", model="m")
+
+
+async def test_create_may_repeat_the_entity_as_a_field_value():
+    tarea = "Registra a Ana Pérez, teléfono 555."
+    created = plan_json(
+        tipo="crear",
+        entidad="Ana Pérez",
+        escrituras_permitidas=[
+            {
+                "entidad": "Cliente",
+                "accion": "create",
+                "campos": {"nombre": "Ana Pérez", "telefono": "555"},
+            }
+        ],
+        dato_pedido=[],
+    )
+    llm = FakeLlm([created])
+    plan = await plan_from_task(llm, tarea, model="m")
+    assert plan.entidad == "Ana Pérez"
+    assert len(llm.calls) == 1

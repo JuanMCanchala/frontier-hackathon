@@ -15,6 +15,7 @@ FROM python:3.12-slim
 ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
     TASKS_DB=/app/data/tasks.sqlite3 \
+    APP_MEMORY_DB=/app/data/app_memory.sqlite3 \
     TRACES_DIR=/app/data/traces
 WORKDIR /app
 RUN useradd --system --uid 10001 --home-dir /app --no-create-home app \
