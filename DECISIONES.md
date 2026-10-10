@@ -10,11 +10,11 @@ Decisión: `GET /health` responde `200 {"ok": true}` sin autenticación; `POST /
 Descartado: exigir token también en /health — rompe el healthcheck sin proteger nada, porque no devuelve información.
 Consecuencias: cualquiera puede saber que el servicio está vivo; no se expone estado ni configuración.
 
-## 2026-10-10 — Una tarea por escritorio: la nueva cancela a la anterior
+## 2026-10-10 — Una tarea por escritorio: la nueva desplaza a la anterior
 Contexto: un escritorio no soporta dos tareas a la vez, y lo que se haga después del plazo cuenta contra la tarea siguiente.
-Decisión: el estado y las tareas activas viven en memoria, indexadas por la URL del escritorio. Una tarea nueva para la misma URL cancela a la anterior y espera a que termine su limpieza (cierre de VNC) antes de arrancar; la cancelada queda `fallida`. El corte por `TASK_DEADLINE_S` usa `asyncio.timeout` y solo publica `fallida` cuando el runner ya terminó de limpiar.
-Descartado: encolar la tarea nueva — la anterior suele estar obsoleta (la evaluación ya pasó a otra) y la cola consumiría el plazo. Rechazar la nueva con 409 — el evaluador no reintenta.
-Consecuencias: nada toca el escritorio tras publicar el estado. El estado se pierde al reiniciar el servicio. Dos escritorios distintos corren en paralelo; la identidad es la URL exacta, incluida su query.
+Decisión: el lock es por escritorio, identificado por host normalizado (hostname en minúsculas + puerto efectivo; se ignoran scheme, path y query). Una tarea nueva revoca de inmediato el lease de la anterior (ya no puede emitir entradas) y espera su cierre ordenado como máximo PREVIOUS_RELEASE_S = 3 s, contados contra su propio plazo; la desplazada queda `fallida`. El cierre de cualquier tarea (vencida, desplazada o apagado) sigue este orden: revocar lease, cancelar runner, esperar hasta STOP_GRACE_S = 2 s, `release_all()` (button-up y key-up de lo presionado, lo único que se emite con el lease revocado), cerrar el websocket, liberar el lock y recién entonces publicar. El actor deja de emitir a ACTOR_STOP_S = 220 s desde el POST; el corte duro es TASK_DEADLINE_S = 260 s.
+Descartado: encolar la tarea nueva — la anterior suele estar obsoleta y la cola consume el plazo. Rechazarla con 409 — el evaluador no reintenta. Esperar sin tope a la anterior — un runner que ignora la cancelación bloquearía el escritorio. Identidad por URL exacta — dos URL del mismo escritorio escritas distinto correrían a la vez.
+Consecuencias: nada toca el escritorio tras publicar el estado, aunque el código de un runner rebelde siga vivo (queda huérfano sin poder emitir). Un runner que no cede el event loop lo bloquea entero: el agente nunca debe reintentar en un bucle sin await. Dos escritorios distintos corren en paralelo.
 
 ## 2026-10-10 — Compuerta de escritura con plan congelado
 Contexto: homónimos, duplicados, cambios de más e inyección acaban en una escritura que no debía ocurrir; la evaluación castiga más el daño que el fallo.
