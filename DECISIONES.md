@@ -1,3 +1,9 @@
+## 2026-10-10 16:55 — Oráculo de la mini app, aparte del websocket
+Contexto: M1–M3 hay que calificarlas y la mini app no tiene `/__reset`, `/__check` ni `/health`. El 6080 es websockify. Un `POST /reiniciar` ahí no llega a los registros, y esperar `/health` deja el harness colgado hasta `health_timeout_s`.
+Decisión: si `MINI_HTTP_URL` está definida, el reinicio y el reset final son `POST /reiniciar` contra ese origen, sin el token del escritorio y sin esperar `/health`. El `/__check` lo sustituye un oráculo puro que compara `GET /registros` justo después del reinicio y al terminar la tarea. `DESKTOP_URL` sigue siendo solo el websocket. No se arranca la vigilancia de pantalla inicial, porque la referencia es de la app de práctica. `lista_blanca` no vacía es error de prueba: no se inventa su esquema. Sin la variable, el camino del evento no cambia.
+Descartado: publicar el 8765 en esta sesión — el contenedor sigue igual y no hubo corrida en vivo. Mandar el check al 6080 — no es el API de los registros. Interpretar `lista_blanca` — en M1–M3 viene vacía y el esquema de una no vacía no está definido.
+Consecuencias: M1–M3 se pueden calificar cuando el 8765 esté accesible en el host. El agente y el contenedor no cambian en este paso; la mejora del agente espera una corrida real.
+
 ## 2026-10-10 17:30 — Mini app CRUD en contenedor local
 Contexto: la evaluación puede usar una app distinta y hace falta medir generalización, autoguardado y edición en celda, que la app de práctica no ofrece.
 Decisión: mini app propia en `apps/mini_crud/`, servida por HTTP dentro del contenedor y expuesta por Xvfb, Chromium en kiosko, x11vnc y websockify en el puerto 6080 con ruta `/websockify`. Reset local por API (`POST /reiniciar`), sin endpoints `/__check` ni `/__reset` del evento.

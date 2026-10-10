@@ -1,29 +1,29 @@
 {
   "id": "M1",
-  "nivel": "facil",
-  "instruccion": "Crea un registro para el equipo Sony 500, mesa 3, nota: Nuevo ingreso.",
+  "nivel": "regular",
+  "instruccion": "Da de alta el aparato Telefunken 540 en el puesto Mesa 4, con la nota Sin antena.",
   "estado_esperado": "terminada",
   "diff_esperado": [
     {
-      "entidad": "registros",
+      "entidad": "aparatos",
       "id": "a5",
       "campo": "name",
       "accion": "create",
-      "valor": "Sony 500"
+      "valor": "Telefunken 540"
     },
     {
-      "entidad": "registros",
+      "entidad": "aparatos",
       "id": "a5",
       "campo": "bench",
       "accion": "create",
-      "valor": "Mesa 3"
+      "valor": "Mesa 4"
     },
     {
-      "entidad": "registros",
+      "entidad": "aparatos",
       "id": "a5",
       "campo": "note",
       "accion": "create",
-      "valor": "Nuevo ingreso"
+      "valor": "Sin antena"
     }
   ],
   "lista_blanca": []

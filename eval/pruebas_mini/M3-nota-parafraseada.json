@@ -1,15 +1,15 @@
 {
   "id": "M3",
   "nivel": "regular",
-  "instruccion": "Deja la nota del registro a1 en 'Condensador reemplazado, OK.'",
+  "instruccion": "Deja la nota del Nordmende 14 en Valvula encargada al almacen.",
   "estado_esperado": "terminada",
   "diff_esperado": [
     {
-      "entidad": "registros",
-      "id": "a1",
+      "entidad": "aparatos",
+      "id": "a4",
       "campo": "note",
       "accion": "update",
-      "valor": "Condensador reemplazado, OK."
+      "valor": "Valvula encargada al almacen"
     }
   ],
   "lista_blanca": []

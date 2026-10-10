@@ -15,6 +15,7 @@ import re
 import sys
 import time
 from collections.abc import Awaitable, Callable, Mapping
+from contextlib import nullcontext
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
@@ -137,8 +138,16 @@ class Harness:
 
     # ---- desktop ---------------------------------------------------------
 
+    def _uses_mini(self) -> bool:
+        return bool(self._env.mini_http_url)
+
+    def _require_mini(self) -> httpx.AsyncClient:
+        if self._mini is None:
+            raise StepError("MINI_HTTP_URL definida y no hay cliente de la mini app")
+        return self._mini
+
     async def reset_desktop(self) -> None:
-        if self._mini is not None:
+        if self._uses_mini():
             await self._mini_reset()
         else:
             await self._event_reset()
@@ -154,28 +163,37 @@ class Harness:
         await self._wait_health()
 
     async def _mini_reset(self) -> None:
-        assert self._mini is not None
+        client = self._require_mini()
         try:
-            response = await self._mini.post("/reiniciar")
+            response = await client.post("/reiniciar")
         except httpx.HTTPError as exc:
             raise StepError(f"/reiniciar falló: {type(exc).__name__}") from exc
         if response.status_code != 200:
             raise StepError(f"/reiniciar respondió {response.status_code}")
-        data = response.json()
-        if data.get("ok") is not True:
-            raise StepError(f"/reiniciar no devolvió ok: {data}")
-        # Capture before snapshot right after reset
+        try:
+            data = response.json()
+        except ValueError as exc:
+            raise StepError("/reiniciar no devolvió JSON") from exc
+        if not isinstance(data, dict) or data.get("ok") is not True:
+            raise StepError("/reiniciar no confirmó ok")
+        # Captured before the settle sleep so the snapshot is the store, not a later edit.
         self._mini_before = await self._mini_get_registros()
 
     async def _mini_get_registros(self) -> list[dict[str, Any]]:
-        assert self._mini is not None
+        client = self._require_mini()
         try:
-            response = await self._mini.get("/registros")
+            response = await client.get("/registros")
         except httpx.HTTPError as exc:
             raise StepError(f"GET /registros falló: {type(exc).__name__}") from exc
         if response.status_code != 200:
             raise StepError(f"GET /registros respondió {response.status_code}")
-        return response.json()
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise StepError("GET /registros no devolvió JSON") from exc
+        if not isinstance(payload, list):
+            raise StepError("GET /registros no devolvió una lista")
+        return payload
 
     async def _wait_health(self) -> None:
         start = self._clock()
@@ -191,7 +209,7 @@ class Harness:
             await self._sleep(self._t.health_interval_s)
 
     async def check(self, raw: Any) -> dict[str, Any]:
-        if self._mini is not None:
+        if self._uses_mini():
             return await self._mini_check(raw)
         return await self._event_check(raw)
 
@@ -207,7 +225,7 @@ class Harness:
         return response.json()
 
     async def _mini_check(self, raw: Any) -> dict[str, Any]:
-        assert self._mini is not None
+        self._require_mini()
         after = await self._mini_get_registros()
         before = self._mini_before or []
         diff = raw.get("diff_esperado", []) if isinstance(raw, dict) else []
@@ -260,6 +278,8 @@ class Harness:
         assert prueba is not None
         r = Resultado(test.test_id, test.source, categoria(prueba), repeticion)
         try:
+            if self._env.mini_http_url and prueba.lista_blanca:
+                raise _TestError("lista_blanca no vacía: el oráculo no define su esquema")
             await self.reset_desktop()
             if self._watch is not None:
                 r.avisos += await self._watch.check(test.test_id)
@@ -329,7 +349,10 @@ class Harness:
         return report
 
     async def _final_reset(self, report: RunReport) -> None:
-        if self._mini is not None:
+        if self._uses_mini():
+            if self._mini is None:
+                report.avisos.append("el reset final (mini) falló: sin cliente")
+                return
             try:
                 await self._mini.post("/reiniciar")
             except httpx.HTTPError as exc:
@@ -424,6 +447,12 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
 
 async def run(args: argparse.Namespace, tests: list[LoadedTest], env: HarnessEnv) -> int:
     auth = lambda token: {"Authorization": f"Bearer {token}"}  # noqa: E731
+    # 6080 is websockify. This client is the registros API and must not carry the desktop token.
+    mini_cm = (
+        httpx.AsyncClient(base_url=env.mini_http_url, timeout=30)
+        if env.mini_http_url
+        else nullcontext(None)
+    )
     async with (
         httpx.AsyncClient(
             base_url=env.desktop_url, headers=auth(env.desktop_token), timeout=30
@@ -432,16 +461,21 @@ async def run(args: argparse.Namespace, tests: list[LoadedTest], env: HarnessEnv
         httpx.AsyncClient(
             headers=auth(env.openrouter_key) if env.openrouter_key else {}, timeout=15
         ) as router,
+        mini_cm as mini,
     ):
+        # The saved reference is the practice app. On the mini desktop it would false-alert,
+        # and the live run should not need --sin-vigilancia to avoid that.
         watch = (
             None
-            if args.sin_vigilancia
+            if args.sin_vigilancia or env.mini_http_url
             else InitialScreenWatch(
                 vnc_capture(env.websocket_url, env.desktop_password),
                 desktop_host=desktop_host(env.websocket_url),
             )
         )
-        harness = Harness(env, desktop, api, router if env.openrouter_key else None, watch=watch)
+        harness = Harness(
+            env, desktop, api, router if env.openrouter_key else None, watch=watch, mini=mini
+        )
         report = await harness.run_all(tests, args.repeticiones)
     print(redact(render(report), env.secrets))
     path = write_results(report, args.etiqueta, env.secrets, RESULTS_DIR, datetime.now())

@@ -6,7 +6,7 @@ No network, no secrets, no side effects.
 
 from typing import Any
 
-_OUTSIDE_ACTIONS = "sin acciones fuera de la tarea"
+from eval.scoring import OUTSIDE_ACTIONS_CHECK
 
 _EDITABLE = frozenset({"name", "bench", "note"})
 
@@ -99,6 +99,6 @@ def mini_oracle(
     outside_ok = len(extra) == 0
     if not outside_ok:
         pass_ = False
-    checks.append({"nombre": _OUTSIDE_ACTIONS, "ok": outside_ok})
+    checks.append({"nombre": OUTSIDE_ACTIONS_CHECK, "ok": outside_ok})
 
     return {"pass": pass_, "checks": checks}
