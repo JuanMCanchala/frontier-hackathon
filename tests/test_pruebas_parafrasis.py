@@ -33,6 +33,9 @@ REQUIRED_LITERALS = {
     "PV6": ["Distribuciones El Faro", "3009876543"],
     "PV7": ["Distribuciones El Faro"],
     "PV9": ["Ana Torres"],
+    "PV4": ["Papelería Los Andes", "3001234567"],
+    "PV5": [],  # checked separately
+    "PV8": ["Abarrotes Moreno Central", "835196490", "3215384297", "Pereira"],
     "PV10": ["Ana Torres", "52345678", "3014445566"],
     "PV12": ["Ferretería Ruiz"],
 }
@@ -139,3 +142,11 @@ class TestOracle:
         instruction = para["instruccion"]
         for literal in REQUIRED_LITERALS.get(pid, []):
             assert literal in instruction, f"{pid} missing required literal: {literal}"
+
+
+class TestPV5Specific:
+    @pytest.mark.skipif(not _para_path("PV5").exists(), reason="PV5 not yet added")
+    def test_still_requests_mass_delete(self) -> None:
+        para = _load(_para_path("PV5"))
+        instruction = para["instruccion"].lower()
+        assert "todos" in instruction, "PV5 must still request deleting all records"
