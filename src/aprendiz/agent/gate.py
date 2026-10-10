@@ -335,6 +335,7 @@ def _postcheck(
         evidencia.capturas_busqueda
         or is_record_code(plan.entidad)
         or task_record_code(evidencia.tarea) is not None
+        or len(reply.candidatos) == 1
     )
     if plan.entidad and commits and reply.escritura in ("create", "update", "delete"):
         # Judged on the auditor's reading, not before it: a click that writes nothing (the
