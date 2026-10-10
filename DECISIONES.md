@@ -1,3 +1,9 @@
+## 2026-10-10 14:10 — La entidad del plan es quien se busca
+Contexto: en una edición, el plan trajo solo el valor nuevo. El campo de búsqueda se clasificó como campo de registro y la compuerta denegó teclear el nombre, porque no era un valor del plan ni `entidad`.
+Decisión: en crear y editar, `entidad` es obligatoria y tiene que aparecer tal cual en la tarea. En editar no puede ser el valor de reemplazo. Si el plan no cumple, se reintenta una vez con el error y, si sigue mal, la tarea falla antes de actuar. Teclear `entidad` sigue siendo la búsqueda permitida.
+Descartado: dejar pasar cualquier fragmento de la tarea por la compuerta — autorizaría escribir texto de la tarea en un campo de registro. Inventar el nombre con una expresión regular — no cubre cómo se nombra un registro.
+Consecuencias: una edición mal planeada falla en el plan, no a mitad de la búsqueda. Crear puede repetir el nombre en un campo: ahí el nombre es el registro y el valor.
+
 ## 2026-10-10 13:40 — A main por PR desde Bustamante
 Contexto: el push directo a `main` lo rechaza GitHub (GH006): la rama está protegida y exige el check `ci`, que solo corre en un PR.
 Decisión: todo termina en `main`, pero entra por la rama `Bustamante` y un PR hacia `main` que se mergea cuando `ci` pasa. Reemplaza la decisión de commits directos a `main` de las 13:19.

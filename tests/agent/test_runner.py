@@ -28,6 +28,8 @@ FAST = VncTimings(
 )
 NAV = json.dumps({"clase": "navegacion"})
 FIELD = json.dumps({"clase": "campo_registro"})
+SEARCH = json.dumps({"clase": "busqueda_filtro"})
+SEARCH_CLICK = act(tipo="click", x=20, y=20)
 NO_EFFECT = json.dumps({"persisted": False, "signal": ""})
 VERIFIED = json.dumps(
     {
@@ -212,12 +214,19 @@ async def test_budget_exhausted_is_fallida(server, settings, tmp_path):
 
 EDIT_PLAN = plan_json(
     tipo="editar",
-    entidad=None,
+    entidad="facturas",
     escrituras_permitidas=[
         {"entidad": "Cliente", "accion": "update", "campos": {"telefono": "555-1"}}
     ],
     dato_pedido=[],
 )
+
+
+def pressed_points(server: FakeRfbServer) -> set[tuple[int, int]]:
+    pressed = {
+        (event[1][1:3], event[1][3:5]) for event in server.pointer_events if event[1][0] == 1
+    }
+    return {(int.from_bytes(x, "big"), int.from_bytes(y, "big")) for x, y in pressed}
 
 
 async def test_gate_final_denial_ends_with_the_distinguishing_data(server, settings, tmp_path):
@@ -234,16 +243,19 @@ async def test_gate_final_denial_ends_with_the_distinguishing_data(server, setti
     )
     llm = question_llm(
         planner=[EDIT_PLAN],
-        actor=[act(tipo="click", x=300, y=300)],
-        classifier=[json.dumps({"clase": "compromiso"})],
+        actor=[SEARCH_CLICK, act(tipo="click", x=300, y=300)],
+        # Two votes per classification; the last reply then repeats.
+        classifier=[SEARCH, SEARCH, json.dumps({"clase": "compromiso"})],
         auditor=[two],
     )
-    result = await make_runner(settings, tmp_path, llm).run(make_ctx(server))
+    result = await run_painted(server, settings, tmp_path, llm)
     assert result.estado == "fallida"
     assert "documento 111" in result.resumen and "documento 222" in result.resumen
     data = summary_json(settings)
     assert data["escrituras_denegadas"] == 1 and data["escrituras_autorizadas"] == 0
-    assert server.pointer_events == []  # nothing was clicked
+    pressed = pressed_points(server)
+    assert (20, 20) in pressed  # the search ran
+    assert (300, 300) not in pressed  # the denied write was not clicked
 
 
 async def paint_on_pointer(server: FakeRfbServer, stop: asyncio.Event) -> None:
@@ -278,7 +290,7 @@ async def test_form_fill_is_authorized_once_clicks_each_field_and_never_uses_tab
 ):
     plan = plan_json(
         tipo="crear",
-        entidad=None,
+        entidad="facturas",
         escrituras_permitidas=[
             {"entidad": "Cliente", "accion": "create", "campos": {"nombre": "Ana"}}
         ],
@@ -339,6 +351,8 @@ async def test_correctable_denial_reaches_the_actor_and_repeats_end_the_task(
 
     def actor(messages) -> str:
         seen_notes.append(messages[-1]["content"])
+        if len(seen_notes) == 1:
+            return SEARCH_CLICK
         return act(tipo="click", x=300, y=300)
 
     deny = json.dumps(
@@ -347,19 +361,21 @@ async def test_correctable_denial_reaches_the_actor_and_repeats_end_the_task(
     llm = question_llm(
         planner=[EDIT_PLAN],
         actor=actor,
-        classifier=[json.dumps({"clase": "compromiso"})],
+        classifier=[SEARCH, SEARCH, json.dumps({"clase": "compromiso"})],
         auditor=[deny],
     )
-    result = await make_runner(settings, tmp_path, llm).run(make_ctx(server))
+    result = await run_painted(server, settings, tmp_path, llm)
     assert result.estado == "fallida" and "wrong field" in result.resumen
     assert llm.count("auditor") == 3  # two corrections allowed, the third denial is final
-    assert "Note: Denied: wrong field" in seen_notes[1]
-    assert server.pointer_events == []
+    assert "Note: Denied: wrong field" in seen_notes[2]
+    pressed = pressed_points(server)
+    assert (20, 20) in pressed
+    assert (300, 300) not in pressed
 
 
 CREATE_PLAN = plan_json(
     tipo="crear",
-    entidad=None,
+    entidad="facturas",
     escrituras_permitidas=[
         {
             "entidad": "Cliente",
@@ -442,7 +458,7 @@ async def test_text_rule_denial_tells_the_actor_the_exact_value(server, settings
 
 SAVE_PLAN = plan_json(
     tipo="crear",
-    entidad=None,
+    entidad="facturas",
     escrituras_permitidas=[{"entidad": "Cliente", "accion": "create", "campos": {"nombre": "Ana"}}],
     dato_pedido=[],
 )
@@ -520,14 +536,26 @@ async def test_save_after_an_authorized_fill_is_authorized_by_continuity_and_end
 
 
 async def test_save_is_audited_when_the_form_changed_since_the_fill(server, settings, tmp_path):
-    llm = save_llm([FILL, act(tipo="click", x=300, y=430), SAVE, act(tipo="done")])
-    llm._scripts["classifier"] = [FIELD, FIELD, FIELD, FIELD, json.dumps({"clase": "compromiso"})]
+    llm = save_llm([SEARCH_CLICK, FILL, act(tipo="click", x=300, y=430), SAVE, act(tipo="done")])
+    llm._scripts["classifier"] = [
+        SEARCH,
+        SEARCH,
+        FIELD,
+        FIELD,
+        FIELD,
+        FIELD,
+        json.dumps({"clase": "compromiso"}),
+    ]
     result = await run_painted(server, settings, tmp_path, llm)
     assert llm.count("auditor") == 2, result.resumen  # screen changed in between: no continuity
 
 
 async def test_save_that_is_not_the_save_button_is_audited(server, settings, tmp_path):
-    llm = save_llm([FILL, SAVE, act(tipo="done")], submit=['{"es_guardar": false}'])
+    llm = save_llm(
+        [SEARCH_CLICK, FILL, SAVE, act(tipo="done")],
+        submit=['{"es_guardar": false}'],
+        classifier=[SEARCH, SEARCH, FIELD, FIELD, json.dumps({"clase": "compromiso"})],
+    )
     await run_painted(server, settings, tmp_path, llm)
     assert llm.count("auditor") == 2
 
@@ -555,7 +583,7 @@ async def test_fill_form_with_a_select_opens_it_and_clicks_the_located_option(
     ]
     plan = plan_json(
         tipo="crear",
-        entidad=None,
+        entidad="facturas",
         escrituras_permitidas=[
             {
                 "entidad": "Cliente",
