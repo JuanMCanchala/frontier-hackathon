@@ -76,6 +76,20 @@ uv run python -m eval.harness --pruebas <carpeta del material>/pruebas --pruebas
 
 Línea base: con el runner que siempre responde `fallida`, las 17 pruebas (5 del evento + 12 propias) dan **2/17**, con 0 falsos éxitos y 0 acciones destructivas. Es el piso contra el que se compara el agente.
 
+## Mini app CRUD local (generalización)
+
+Segunda app con otro layout y etiquetas, en un contenedor propio con Xvfb, Chromium en kiosko y VNC por websockify (`1280×800`). Sirve para medir generalización y para probar autoguardado en celda; **no sustituye** al escritorio del evento ni se despliega en Railway (solo uso local).
+
+```bash
+docker build -t mini-crud:local apps/mini_crud
+export VNC_PASSWORD='<contraseña de hasta 8 caracteres>'
+./apps/mini_crud/levantar.sh   # publica el puerto 6080
+DESKTOP_URL=ws://127.0.0.1:6080/websockify DESKTOP_PASSWORD="$VNC_PASSWORD" \
+  uv run python eval/smoke_driver.py
+```
+
+La contraseña VNC solo va en el entorno al arrancar el contenedor; no va en la imagen ni en el repo. El paquete vive en `apps/mini_crud/` y no forma parte del wheel instalable `aprendiz`.
+
 ## Contenedor y despliegue
 
 ```bash
@@ -100,5 +114,6 @@ eval/
   scoring.py   reglas de calificación
   pruebas/     pruebas propias
 tests/         tests offline (servidor RFB falso, runners falsos)
+apps/mini_crud/ mini app CRUD local (VNC, fuera del wheel)
 docs/          diseño y diagramas
 ```

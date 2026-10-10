@@ -1,3 +1,9 @@
+## 2026-10-10 17:30 — Mini app CRUD en contenedor local
+Contexto: la evaluación puede usar una app distinta y hace falta medir generalización, autoguardado y edición en celda, que la app de práctica no ofrece.
+Decisión: mini app propia en `apps/mini_crud/`, servida por HTTP dentro del contenedor y expuesta por Xvfb, Chromium en kiosko, x11vnc y websockify en el puerto 6080 con ruta `/websockify`. Reset local por API (`POST /reiniciar`), sin endpoints `/__check` ni `/__reset` del evento.
+Descartado: reutilizar la app de práctica con otros datos — mismo layout, no mide generalización. Implementar un servidor RFB propio — el driver ya habla VNC estándar. TigerVNC/Xvnc como sustituto de Xvfb — cambia el stack de pantalla en lugar de engancharse al display virtual.
+Consecuencias: el humo `eval/smoke_driver.py` puede correr contra `ws://127.0.0.1:6080/websockify`; esa imagen no es el escritorio del evento ni comparte despliegue con el servicio del agente en Railway.
+
 ## 2026-10-10 13:40 — A main por PR desde Bustamante
 Contexto: el push directo a `main` lo rechaza GitHub (GH006): la rama está protegida y exige el check `ci`, que solo corre en un PR.
 Decisión: todo termina en `main`, pero entra por la rama `Bustamante` y un PR hacia `main` que se mergea cuando `ci` pasa. Reemplaza la decisión de commits directos a `main` de las 13:19.
