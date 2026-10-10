@@ -1,3 +1,9 @@
+## 2026-10-10 15:58 — El actor queda en haiku
+Contexto: el hito de las 16:00 pide la decisión final del actor. El A/B de 40 corridas contra ui-tars no cabe: el escritorio de práctica está en el incidente y `UiTarsActor` no está implementado (decisión de las 12:17).
+Decisión: el actor del servicio es `anthropic/claude-haiku-5.5`, el valor de `ACTOR_MODEL`. No se revive el adaptador de ui-tars en este hito.
+Descartado: correr el A/B ahora — choca con el lock del escritorio y el adaptador lanza `NotImplementedError`. Implementar el adaptador en esta hora — retrasa la mini app, que es lo que mide generalización.
+Consecuencias: no hay comparación heurística de las 40 corridas. La elección queda por el benchmark de ubicación y porque es el único adaptador que emite acciones.
+
 ## 2026-10-10 15:05 — Paráfrasis en carpeta aparte
 Contexto: la sección 8.4 del diseño mide si el resultado depende de la redacción. Hacen falta doce instrucciones que digan lo mismo con otras palabras, sin mezclarlas con las que ya se corren.
 Decisión: una paráfrasis por archivo de `eval/pruebas/`, en `eval/parafrasis/`. El id es P más el mismo número y el archivo repite el sufijo. Solo cambia `instruccion`. Esta sesión no las ejecuta contra el escritorio.
