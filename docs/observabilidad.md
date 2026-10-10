@@ -14,6 +14,10 @@ Un exportador que reenvía a un Langfuse auto-hospedado la traza local de cada t
 | Despliegue | Auto-hospedado en la misma zona que el servicio; las capturas no salen a una nube externa |
 | Configuración | En un solo sitio, por variables de entorno |
 
+El host es el servicio `langfuse-web` de Railway, en el proyecto `frontier-langfuse`, aparte del servicio `aprendiz` (ver `DECISIONES.md`). Mientras `LANGFUSE_HOST` y las llaves estén vacías, el exportador no hace llamadas.
+
+Uso: el harness exporta al cerrar la corrida, después de escribir `eval/resultados/`. Para una corrida ya guardada se usa `uv run --env-file .env python -m eval.langfuse_export --resultados RUTA`.
+
 ## Alternativas descartadas
 
 | Alternativa | Por qué no |
