@@ -25,6 +25,8 @@ from aprendiz.vnc import VncClient, VncError
 log = logging.getLogger(__name__)
 
 _WRITE_TYPES = ("crear", "editar", "exportar")
+CONNECT_RETRY_PAUSE_S = 2.0
+CONNECT_RETRY_MARGIN_S = 60.0  # a retry this close to the hard deadline would leave no task time
 _VERBS = {"create": "creado", "update": "actualizado", "delete": "eliminado", "export": "exportado"}
 
 
@@ -144,10 +146,27 @@ class AgentRunner:
 
     # ---- phases ---------------------------------------------------------------
 
+    async def _connect(self, ctx: RunContext, client: VncClient) -> None:
+        """One retry when the desktop is slow to answer: the practice desktop timed out on the
+        handshake now and then, and a single timeout used to end the task as an internal error.
+        A wrong password or a protocol error is not retried."""
+        try:
+            await client.connect(ctx.escritorio.url, ctx.escritorio.password)
+            return
+        except (TimeoutError, OSError) as exc:
+            if time.monotonic() > ctx.deadline - CONNECT_RETRY_MARGIN_S:
+                raise VncError(f"el escritorio no respondió al conectar: {exc!r}") from exc
+            log.warning("vnc connect failed, retrying once", extra={"error": repr(exc)})
+        await asyncio.sleep(CONNECT_RETRY_PAUSE_S)
+        try:
+            await client.connect(ctx.escritorio.url, ctx.escritorio.password)
+        except (TimeoutError, OSError) as exc:
+            raise VncError(f"el escritorio no respondió al conectar: {exc!r}") from exc
+
     async def _run_task(
         self, ctx: RunContext, client: VncClient, llm: Llm, trace: TaskTrace
     ) -> Finish:
-        await client.connect(ctx.escritorio.url, ctx.escritorio.password)
+        await self._connect(ctx, client)
         first = await client.screenshot()
         if first.size != (SCREEN_WIDTH, SCREEN_HEIGHT):
             return Finish.failed(

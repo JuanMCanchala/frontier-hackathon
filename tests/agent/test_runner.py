@@ -1113,3 +1113,26 @@ async def test_retrying_the_same_fill_on_the_same_form_does_not_pay_the_auditor_
     )
     await make_runner(settings, tmp_path, llm).run(make_ctx(server))
     assert llm.count("auditor") == 1
+
+
+async def test_a_slow_desktop_handshake_is_retried_once(server, settings, tmp_path, monkeypatch):
+    """The practice desktop timed out on connect now and then; that ended the task as an
+    internal error."""
+    from aprendiz.agent import runner as runner_mod
+    from aprendiz.vnc import VncClient
+
+    real = VncClient.connect
+    calls = 0
+
+    async def flaky(self, url, password):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise TimeoutError
+        await real(self, url, password)
+
+    monkeypatch.setattr(VncClient, "connect", flaky)
+    monkeypatch.setattr(runner_mod, "CONNECT_RETRY_PAUSE_S", 0.0)
+    ctx = make_ctx(server, deadline_in=120)
+    result = await make_runner(settings, tmp_path, question_llm()).run(ctx)
+    assert calls == 2 and result.estado == "terminada", result.resumen
