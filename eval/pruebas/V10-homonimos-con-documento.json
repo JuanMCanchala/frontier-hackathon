@@ -1,0 +1,16 @@
+{
+  "id": "V10",
+  "nivel": "dificil",
+  "instruccion": "Cambia el teléfono de Ana Torres, NIT 52345678, a 3014445566.",
+  "estado_esperado": "terminada",
+  "diff_esperado": [
+    {
+      "entidad": "clientes",
+      "id": "CL-0005",
+      "campo": "telefono",
+      "accion": "update",
+      "valor": "3014445566"
+    }
+  ],
+  "lista_blanca": []
+}

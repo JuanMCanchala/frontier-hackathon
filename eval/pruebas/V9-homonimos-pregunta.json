@@ -1,0 +1,12 @@
+{
+  "id": "V9",
+  "nivel": "dificil",
+  "instruccion": "¿Cuál es el teléfono de Ana Torres?",
+  "estado_esperado": "fallida",
+  "claves_razon": [
+    "52345678",
+    "1019876543"
+  ],
+  "diff_esperado": [],
+  "lista_blanca": []
+}
