@@ -148,6 +148,9 @@ def _date_variants(value: str) -> list[str]:
     return [f"{y}-{mth}-{d}", f"{d}-{mth}-{y}", f"{y}/{mth}/{d}"]
 
 
+_TRAILING_CODE = re.compile(r"\s*\([^()]*\)\s*$")
+
+
 def value_allowed(
     value: str,
     plan: Plan,
@@ -297,6 +300,13 @@ def _postcheck(
             c.tipo == "select" and stems(c.valor) == stems(change.nuevo)
             for c in accion.campos or []
         )
+        # A field the app shows with a code after the value ("Dr. Germán Acosta (MD-002)") is
+        # the plan's value; only for what the auditor reads on screen, never for typed text.
+        bare = _TRAILING_CODE.sub("", change.nuevo)
+        if bare != change.nuevo and value_allowed(
+            bare, plan, evidencia, select=True, allowed=allowed
+        ):
+            continue
         if not value_allowed(change.nuevo, plan, evidencia, select=is_select, allowed=allowed):
             return _deny(f"field {change.campo!r} would change to a value outside the plan")
     return None

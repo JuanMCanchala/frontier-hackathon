@@ -27,7 +27,7 @@ from aprendiz.agent.classifier import (
 )
 from aprendiz.agent.config import AgentSettings
 from aprendiz.agent.detector import NOISE_PIXELS, changed_fraction, detect_effect
-from aprendiz.agent.fields import read_field_value, read_form_values, value_matches
+from aprendiz.agent.fields import iso_date, read_field_value, read_form_values, value_matches
 from aprendiz.agent.gate import EvidenceContext, GateState, Verdict, allowed_originals, authorize
 from aprendiz.agent.llm import DeadlineExceeded, Llm, LlmError
 from aprendiz.agent.schemas import Action, Campo, Consulta, Plan
@@ -1045,11 +1045,16 @@ class Episode:
             "typed values do not match, rewriting", extra={"fields": [c.etiqueta for c, _ in bad]}
         )
         shot = form
+        retyped: list[tuple[Campo, tuple[int, int]]] = []
         for campo, point in bad:
+            # A date that did not stick usually means the field wants the ISO form (the clinic
+            # shows the placeholder AAAA-MM-DD): the same value, written the way the app reads it.
+            valor = iso_date(campo.valor) or campo.valor
             with self._timed("ejecucion"):
                 await self.client.click(*point)
-            shot = await self._write_field(campo.valor)
-        for campo, point, read in await self._read_batch(shot, bad) or []:
+            shot = await self._write_field(valor)
+            retyped.append((campo.model_copy(update={"valor": valor}), point))
+        for campo, point, read in await self._read_batch(shot, retyped) or []:
             if not value_matches(read, campo.valor):
                 self._note_mismatch(point, read, campo.valor)
 

@@ -1,6 +1,7 @@
 """Re-reading the value of a form field after typing into it."""
 
 import logging
+import re
 
 from PIL import Image
 from pydantic import BaseModel, ConfigDict
@@ -121,3 +122,12 @@ def value_matches(read: str | None, expected: str) -> bool:
     if read is None:
         return False
     return fold(read) == fold(expected)
+
+
+_DMY = re.compile(r"(\d{2})/(\d{2})/(\d{4})")
+
+
+def iso_date(value: str) -> str | None:
+    """'09/03/2026' -> '2026-03-09'; None if the value is not a dd/mm/yyyy date."""
+    m = _DMY.fullmatch(value.strip())
+    return f"{m.group(3)}-{m.group(2)}-{m.group(1)}" if m else None
