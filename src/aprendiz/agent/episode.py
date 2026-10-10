@@ -30,7 +30,7 @@ from aprendiz.agent.detector import NOISE_PIXELS, changed_fraction, detect_effec
 from aprendiz.agent.fields import read_field_value, read_form_values, value_matches
 from aprendiz.agent.gate import EvidenceContext, GateState, Verdict, allowed_originals, authorize
 from aprendiz.agent.llm import DeadlineExceeded, Llm, LlmError
-from aprendiz.agent.schemas import Action, Campo, Plan
+from aprendiz.agent.schemas import Action, Campo, Consulta, Plan
 from aprendiz.agent.structured import InvalidReply
 from aprendiz.agent.table_reader import (
     Punto,
@@ -60,6 +60,7 @@ _CONTINUITY_ACTIONS = {"create", "update"}
 
 
 _EDIT_KEYS = {"ctrl+a", "backspace", "delete"}
+VIEW_CHANGE = 0.15  # share of the screen a navigation must repaint to count as a new view
 
 
 def _edits_text(combo: str) -> bool:
@@ -294,8 +295,7 @@ class Episode:
         """Walk the table from its first page, transcribe each page, and let code count or add.
         The answer comes from here, never from the actor's own tally. Any doubt about having seen
         every page exactly once ends the task fallida instead of answering a partial count."""
-        consulta = self.plan.consulta
-        assert consulta is not None
+        consulta = self._resolved_consulta()
         acc = TableAccumulator()
         page = await self._rewind(await self._table_page(acc), acc)
         acc.add(page)
@@ -323,6 +323,21 @@ class Episode:
             memo=result.desglose[:300],
             razon="computed by code from the table pages",
         )
+
+    def _resolved_consulta(self) -> Consulta:
+        """Filter values may name a plan parameter ("Fecha": "fecha_ayer"): filter by the value
+        the code resolved, never by the parameter's name (that matched no row and answered 0)."""
+        consulta = self.plan.consulta
+        assert consulta is not None
+        filtros: dict[str, str] = {}
+        for column, value in consulta.filtros.items():
+            if value in self.params:
+                filtros[column] = self.params[value]
+            elif value in self.plan.parametros:
+                raise EndTask("fail", f"no se pudo resolver el parámetro {value!r} del filtro")
+            else:
+                filtros[column] = value
+        return consulta.model_copy(update={"filtros": filtros})
 
     @staticmethod
     def _so_far(acc: TableAccumulator) -> list[str]:
@@ -806,9 +821,11 @@ class Episode:
                 f"No visible change after {describe(action)}. Do not assume it worked: "
                 "re-read the screen before deciding."
             )
-        if clase == "navegacion" and changed:
+        if clase == "navegacion" and changed and changed_fraction(shot, after)[1] >= VIEW_CHANGE:
             # A new view or form: a baseline taken on the previous screen (e.g. the list where
             # the search box was typed) would make the auditor compare against the wrong form.
+            # Closing a date picker or a dropdown inside the form is not one: dropping the
+            # baseline there left the Save of PD-0143 without its "form when opened".
             self._form_initial = None
             self.evidence_form = None
         if clase == "busqueda_filtro" and changed:
@@ -935,12 +952,18 @@ class Episode:
         once, after the whole batch."""
         last: tuple[Image.Image, tuple[int, int]] | None = None
         typed_fields: list[tuple[Campo, tuple[int, int]]] = []
-        for campo in campos:
+        # Every field is classified at once on the form as opened: one round trip instead of one
+        # per field (a four-field form spent 22 s classifying in series). A field is classified
+        # again only if the layout moved under it.
+        upfront = await asyncio.gather(
+            *(self._classify(first_shot, (c.x, c.y), "click") for c in campos)
+        )
+        for campo, clase in zip(campos, upfront, strict=True):
             shot = first_shot if last is None else await self._snap()
             point = (campo.x, campo.y)
             if last is not None and self._layout_shifted(last[0], shot, last[1]):
                 point = await self._relocate(shot, campo)
-            clase = await self._classify(shot, point, "click")
+                clase = await self._classify(shot, point, "click")
             if campo.tipo == "select":
                 last = (await self._fill_select(point, clase, campo), point)
                 continue
@@ -957,7 +980,8 @@ class Episode:
 
     async def _read_batch(
         self, shot: Image.Image, items: list[tuple[Campo, tuple[int, int]]]
-    ) -> list[tuple[Campo, tuple[int, int], str | None]]:
+    ) -> list[tuple[Campo, tuple[int, int], str | None]] | None:
+        """None when the read itself failed (a moderation block, a timeout)."""
         with self._timed("lectura_campo"):
             values = await read_form_values(
                 self._classifier_llm,
@@ -967,17 +991,20 @@ class Episode:
                 fallback=self.agent.CLASSIFIER_FALLBACK_MODEL,
                 deadline=self._deadline,
             )
+        if values is None:
+            return None
         return [(c, p, values.get(c.etiqueta)) for c, p in items]
 
     async def _verify_batch(
         self, form: Image.Image, items: list[tuple[Campo, tuple[int, int]]]
     ) -> None:
-        """Rewrite only the fields whose value does not match, then check just those again."""
-        bad = [
-            (c, p)
-            for c, p, read in await self._read_batch(form, items)
-            if not value_matches(read, c.valor)
-        ]
+        """Rewrite only the fields whose value does not match, then check just those again. A
+        failed read proves nothing: the fields stay as typed and the verifier reads the saved
+        record at the end (rewriting over failed reads used up E1's time on the deployment)."""
+        reads = await self._read_batch(form, items)
+        if reads is None:
+            return
+        bad = [(c, p) for c, p, read in reads if not value_matches(read, c.valor)]
         if not bad:
             return
         log.warning(
@@ -988,7 +1015,7 @@ class Episode:
             with self._timed("ejecucion"):
                 await self.client.click(*point)
             shot = await self._write_field(campo.valor)
-        for campo, point, read in await self._read_batch(shot, bad):
+        for campo, point, read in await self._read_batch(shot, bad) or []:
             if not value_matches(read, campo.valor):
                 self._note_mismatch(point, read, campo.valor)
 

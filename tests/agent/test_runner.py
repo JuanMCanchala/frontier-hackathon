@@ -1046,3 +1046,49 @@ async def test_ctrl_a_after_a_click_that_focused_no_text_field_is_never_sent(
     assert result.estado == "fallida"
     keysyms = {int.from_bytes(event[3:7], "big") for event in server.key_events}
     assert ord("a") not in keysyms
+
+
+async def test_a_filter_that_names_a_parameter_filters_by_its_resolved_value(
+    server, settings, tmp_path
+):
+    """The planner wrote "Fecha": "fecha_ayer"; filtering by that name matched no row and the
+    code answered 0 where the screen showed 2."""
+    plan = plan_json(
+        entidad=None,
+        parametros={"fecha_ayer": "fecha:2026-10-13"},
+        consulta={"operacion": "conteo", "filtros": {"Fecha": "fecha_ayer"}},
+    )
+    table = json.dumps(
+        {
+            "columnas": ["Código", "Fecha"],
+            "filas": [["PD-0143", "13/10/2026"], ["PD-0186", "13/10/2026"]],
+            "pagina_actual": 1,
+            "hay_siguiente": False,
+            "siguiente": None,
+            "anterior": None,
+            "total_visible": None,
+        }
+    )
+    llm = question_llm(planner=[plan], actor=[act(tipo="done")], table=[table], verifier=[COUNT_OK])
+    result = await make_runner(settings, tmp_path, llm).run(make_ctx(server))
+    assert result.estado == "terminada", result.resumen
+    assert result.resumen.splitlines()[0] == "respuesta: 2"
+
+
+async def test_create_that_finds_the_record_listed_names_it_in_the_summary(
+    server, settings, tmp_path
+):
+    plan = plan_json(
+        tipo="crear",
+        entidad="Abarrotes Moreno Central",
+        escrituras_permitidas=[
+            {"entidad": "Cliente", "accion": "create", "campos": {"nombre": "Abarrotes Moreno"}}
+        ],
+        dato_pedido=[],
+    )
+    llm = question_llm(
+        planner=[plan],
+        actor=[act(tipo="done", memo="Cliente ya registrado como CL-0053; no se creó nada.")],
+    )
+    result = await make_runner(settings, tmp_path, llm).run(make_ctx(server))
+    assert result.estado == "fallida" and "CL-0053" in result.resumen
