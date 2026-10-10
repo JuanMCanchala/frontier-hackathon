@@ -93,6 +93,8 @@ DESKTOP_URL=ws://127.0.0.1:6080/websockify DESKTOP_PASSWORD="$VNC_PASSWORD" \
 
 La contraseña VNC solo va en el entorno al arrancar el contenedor; no va en la imagen ni en el repo. El paquete vive en `apps/mini_crud/` y no forma parte del wheel instalable `aprendiz`.
 
+Las tres tareas de esa app están en `eval/pruebas_mini/` (alta, nota en celda, y la misma nota parafraseada). No van en `eval/pruebas/`: un harness contra el escritorio de práctica las recogería. El esquema se valida con `uv run python -m eval.harness --pruebas eval/pruebas_mini --dry-run`. La mini app no tiene `/__check` ni `/__reset`; el reset local es `POST /reiniciar` dentro del contenedor.
+
 ## Contenedor y despliegue
 
 ```bash

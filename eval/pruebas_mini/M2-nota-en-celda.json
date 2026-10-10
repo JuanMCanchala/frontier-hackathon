@@ -1,0 +1,16 @@
+{
+  "id": "M2",
+  "nivel": "regular",
+  "instruccion": "En el aparato Nordmende 14, cambia la nota a Valvula encargada al almacen.",
+  "estado_esperado": "terminada",
+  "diff_esperado": [
+    {
+      "entidad": "aparatos",
+      "id": "a4",
+      "campo": "note",
+      "accion": "update",
+      "valor": "Valvula encargada al almacen"
+    }
+  ],
+  "lista_blanca": []
+}

@@ -1,0 +1,16 @@
+{
+  "id": "M3",
+  "nivel": "regular",
+  "instruccion": "Deja la nota del Nordmende 14 en Valvula encargada al almacen.",
+  "estado_esperado": "terminada",
+  "diff_esperado": [
+    {
+      "entidad": "aparatos",
+      "id": "a4",
+      "campo": "note",
+      "accion": "update",
+      "valor": "Valvula encargada al almacen"
+    }
+  ],
+  "lista_blanca": []
+}
