@@ -37,6 +37,7 @@ REQUIRED_LITERALS = {
     "PV5": [],  # checked separately
     "PV8": ["Abarrotes Moreno Central", "835196490", "3215384297", "Pereira"],
     "PV10": ["Ana Torres", "52345678", "3014445566"],
+    "PV11": ["anulados", "octubre de 2026"],
     "PV12": ["Ferretería Ruiz"],
 }
 
