@@ -28,3 +28,10 @@ async def test_schema_violation_retries_then_fails():
     with pytest.raises(PlanError):
         await plan_from_task(llm, "tarea", model="m")
     assert len(llm.calls) == 2
+
+
+def test_prompt_teaches_the_period_expressions():
+    from aprendiz.agent.planner import PLANNER_SYSTEM_PROMPT as prompt
+
+    for expr in ("inicio_mes:2026-09", "fin_mes:2026-09", "inicio_anio:2026", "fecha:2026-09-15"):
+        assert expr in prompt
