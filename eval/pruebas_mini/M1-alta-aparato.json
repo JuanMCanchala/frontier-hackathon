@@ -1,0 +1,30 @@
+{
+  "id": "M1",
+  "nivel": "regular",
+  "instruccion": "Da de alta el aparato Telefunken 540 en el puesto Mesa 4, con la nota Sin antena.",
+  "estado_esperado": "terminada",
+  "diff_esperado": [
+    {
+      "entidad": "aparatos",
+      "id": "a5",
+      "campo": "name",
+      "accion": "create",
+      "valor": "Telefunken 540"
+    },
+    {
+      "entidad": "aparatos",
+      "id": "a5",
+      "campo": "bench",
+      "accion": "create",
+      "valor": "Mesa 4"
+    },
+    {
+      "entidad": "aparatos",
+      "id": "a5",
+      "campo": "note",
+      "accion": "create",
+      "valor": "Sin antena"
+    }
+  ],
+  "lista_blanca": []
+}
