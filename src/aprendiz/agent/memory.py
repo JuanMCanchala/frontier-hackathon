@@ -257,3 +257,83 @@ class AppMemory:
             self._conn.execute(
                 "UPDATE procedures SET invalidated=1 WHERE procedure_id=?", (procedure_id,)
             )
+
+
+class MemorySession:
+    """One task's notes. A store error is logged and swallowed so the task can continue."""
+
+    def __init__(
+        self,
+        store: AppMemory | None,
+        identity: AppIdentity | None,
+        *,
+        hints: tuple[str, ...] = (),
+        used_procedure_ids: Sequence[str] = (),
+        business_values: Sequence[str] = (),
+    ) -> None:
+        self.hints = hints
+        self._store = store
+        self._identity = identity
+        self._used = tuple(used_procedure_ids)
+        self._business = [value for value in business_values if value.strip()]
+        self._labels: list[str] = []
+        self._actions: list[str] = []
+
+    def remember_business(self, value: str) -> None:
+        if value.strip():
+            self._business.append(value)
+
+    def note_navigation(self, label: str) -> None:
+        text = label.strip()
+        store, identity = self._store, self._identity
+        if not text or store is None or identity is None:
+            return
+        try:
+            store.save_menu_route(identity, (text,), business_values=self._business)
+        except MemoryRejected:
+            log.warning("app memory rejected content: navigation")
+            return
+        except (sqlite3.Error, OSError) as exc:
+            log.warning("app memory unavailable", extra={"error": type(exc).__name__})
+            return
+        self._labels.append(text)
+
+    def note_action(self, action_type: str) -> None:
+        if action_type in _ACTION_TYPES:
+            self._actions.append(action_type)
+
+    def save_verified(self) -> None:
+        store, identity = self._store, self._identity
+        if not self._actions or store is None or identity is None:
+            return
+        self._write(
+            lambda: store.save_procedure(
+                identity,
+                tuple(self._labels),
+                tuple(self._actions),
+                business_values=self._business,
+            )
+        )
+
+    def invalidate_used(self) -> None:
+        store = self._store
+        if store is None:
+            return
+        for procedure_id in self._used:
+            self._write(lambda procedure_id=procedure_id: store.invalidate_procedure(procedure_id))
+
+    def close(self) -> None:
+        if self._store is None:
+            return
+        try:
+            self._store.close()
+        except sqlite3.Error as exc:
+            log.warning("app memory unavailable", extra={"error": type(exc).__name__})
+
+    def _write(self, fn) -> None:
+        try:
+            fn()
+        except MemoryRejected:
+            log.warning("app memory rejected content: procedure")
+        except (sqlite3.Error, OSError) as exc:
+            log.warning("app memory unavailable", extra={"error": type(exc).__name__})

@@ -9,12 +9,13 @@ from PIL import Image
 
 from aprendiz.agent.budget import BudgetExceeded
 from aprendiz.agent.config import AgentSettings
+from aprendiz.agent.episode import Episode
 from aprendiz.agent.identity import screen_dhash
 from aprendiz.agent.memory import AppIdentity, AppMemory
 from aprendiz.agent.runner import AgentRunner
 from aprendiz.config import Settings, VncTimings
 from aprendiz.models import Escritorio, RunContext
-from aprendiz.vnc import Lease
+from aprendiz.vnc import Lease, VncError
 from tests.agent.fakes import RoutedLlm, act, plan_json
 from tests.fake_server import PASSWORD, FakeRfbServer
 
@@ -673,6 +674,103 @@ async def test_sqlite_error_does_not_fail_the_task(server, tmp_path, caplog):
         result = await make_runner(settings, tmp_path, llm).run(make_ctx(server))
     assert result.estado == "terminada", result.resumen
     assert "app memory" in caplog.text.lower()
+
+
+def _seed_procedure(settings: Settings) -> str:
+    app = AppIdentity("Facturas 1.2", screen_dhash(Image.new("RGB", (1280, 800))))
+    store = AppMemory(settings.APP_MEMORY_DB)
+    procedure_id = store.save_procedure(app, ("Clientes",), ("click",))
+    store.close()
+    return procedure_id
+
+
+async def test_verified_task_stores_the_navigation_label_and_action_type(server, tmp_path):
+    settings = memory_settings(tmp_path)
+    llm = question_llm(
+        identidad=['{"texto": "Facturas 1.2"}'],
+        actor=[
+            act(tipo="click", x=10, y=20, razon="Clientes"),
+            act(tipo="done", respuesta=["1,234"]),
+            act(tipo="done"),
+        ],
+    )
+    result = await make_runner(settings, tmp_path, llm).run(make_ctx(server))
+    assert result.estado == "terminada", result.resumen
+    store = AppMemory(settings.APP_MEMORY_DB)
+    app = AppIdentity("Facturas 1.2", screen_dhash(Image.new("RGB", (1280, 800))))
+    current = store.list_current(app)
+    store.close()
+    assert [route.labels for route in current.routes] == [("Clientes",)]
+    assert [item.action_types for item in current.procedures] == [("click",)]
+
+
+async def test_failed_verification_invalidates_the_hinted_procedure(server, tmp_path):
+    settings = memory_settings(tmp_path)
+    procedure_id = _seed_procedure(settings)
+    llm = question_llm(
+        identidad=['{"texto": "Facturas 1.2"}'],
+        verifier=[json.dumps({"verificado": False, "observado": [], "no_verificable": ["total"]})],
+    )
+    result = await make_runner(settings, tmp_path, llm).run(make_ctx(server))
+    assert result.estado == "fallida", result.resumen
+    store = AppMemory(settings.APP_MEMORY_DB)
+    listed = store.list_current(
+        AppIdentity("Facturas 1.2", screen_dhash(Image.new("RGB", (1280, 800))))
+    )
+    store.close()
+    assert procedure_id not in {item.procedure_id for item in listed.procedures}
+
+
+async def test_actor_fail_with_hints_invalidates_the_procedure(server, tmp_path):
+    settings = memory_settings(tmp_path)
+    procedure_id = _seed_procedure(settings)
+    llm = question_llm(
+        identidad=['{"texto": "Facturas 1.2"}'],
+        actor=[act(tipo="fail", motivo="no sigue", datos_motivo=[])],
+    )
+    result = await make_runner(settings, tmp_path, llm).run(make_ctx(server))
+    assert result.estado == "fallida"
+    store = AppMemory(settings.APP_MEMORY_DB)
+    listed = store.list_current(
+        AppIdentity("Facturas 1.2", screen_dhash(Image.new("RGB", (1280, 800))))
+    )
+    store.close()
+    assert procedure_id not in {item.procedure_id for item in listed.procedures}
+
+
+async def test_timeout_vnc_and_budget_do_not_invalidate(server, tmp_path, monkeypatch):
+    settings = memory_settings(tmp_path)
+    procedure_id = _seed_procedure(settings)
+    app = AppIdentity("Facturas 1.2", screen_dhash(Image.new("RGB", (1280, 800))))
+
+    async def still_listed() -> None:
+        store = AppMemory(settings.APP_MEMORY_DB)
+        listed = {item.procedure_id for item in store.list_current(app).procedures}
+        store.close()
+        assert procedure_id in listed
+
+    timed = question_llm(identidad=['{"texto": "Facturas 1.2"}'])
+    result = await make_runner(settings, tmp_path, timed).run(make_ctx(server, actor_in=0.1))
+    assert result.estado == "fallida"
+    await still_listed()
+
+    async def drop(self):
+        raise VncError("dropped")
+
+    monkeypatch.setattr(Episode, "run_execution", drop)
+    dropped_llm = question_llm(identidad=['{"texto": "Facturas 1.2"}'])
+    dropped = await make_runner(settings, tmp_path, dropped_llm).run(make_ctx(server))
+    assert dropped.estado == "fallida"
+    await still_listed()
+
+    async def over_budget(self):
+        raise BudgetExceeded("over")
+
+    monkeypatch.setattr(Episode, "run_execution", over_budget)
+    broke_llm = question_llm(identidad=['{"texto": "Facturas 1.2"}'])
+    broke = await make_runner(settings, tmp_path, broke_llm).run(make_ctx(server))
+    assert broke.estado == "fallida"
+    await still_listed()
 
 
 async def test_disabled_memory_does_not_read(server, tmp_path):

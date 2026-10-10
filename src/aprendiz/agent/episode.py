@@ -30,6 +30,7 @@ from aprendiz.agent.detector import NOISE_PIXELS, changed_fraction, detect_effec
 from aprendiz.agent.fields import read_field_value, value_matches
 from aprendiz.agent.gate import EvidenceContext, GateState, Verdict, allowed_originals, authorize
 from aprendiz.agent.llm import DeadlineExceeded, Llm, LlmError
+from aprendiz.agent.memory import MemorySession
 from aprendiz.agent.schemas import Action, Campo, Plan
 from aprendiz.agent.textmatch import exact_hint
 from aprendiz.agent.textrule import blank_region, crop_box, text_allowed
@@ -113,6 +114,7 @@ class Episode:
         auditor_llm: Llm,
         detector_llm: Llm,
         hints: tuple[str, ...] = (),
+        notes: MemorySession | None = None,
     ) -> None:
         self.ctx = ctx
         self.agent = agent
@@ -126,6 +128,7 @@ class Episode:
         self._auditor_llm = auditor_llm
         self._detector_llm = detector_llm
         self.hints = hints
+        self._notes = notes or MemorySession(None, None)
 
         self.history: list[str] = []
         self.last_shot: Image.Image | None = None
@@ -606,6 +609,13 @@ class Episode:
             self._prev_write = verdict.motivo or describe(action)
             if not changed:
                 self._unconfirmed = action_key(action)
+        if self._mode != "ejecucion":
+            return
+        if action.texto:
+            self._notes.remember_business(action.texto)
+        self._notes.note_action(action.tipo)
+        if clase == "navegacion" and action.tipo in ("click", "double_click"):
+            self._notes.note_navigation(action.razon)
 
     # ---- typing -----------------------------------------------------------------
 
@@ -657,6 +667,9 @@ class Episode:
         verdict = await self._authorize(action, shot, first, rec)
         if verdict is None:
             return
+        self._notes.note_action("fill_form")
+        for campo in campos:
+            self._notes.remember_business(campo.valor)
         self._prev_write = None
         if self._form_initial is None:
             self._form_initial = shot

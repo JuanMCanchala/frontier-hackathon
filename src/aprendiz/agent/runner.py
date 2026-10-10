@@ -14,7 +14,7 @@ from aprendiz.agent.episode import EndTask, Episode, Fin
 from aprendiz.agent.hoy import ParamError, read_today, resolve_params
 from aprendiz.agent.identity import read_app_identity
 from aprendiz.agent.llm import Llm, LlmError, OpenRouterClient
-from aprendiz.agent.memory import AppMemory, MemoryRejected, render_hints
+from aprendiz.agent.memory import AppMemory, MemoryRejected, MemorySession, render_hints
 from aprendiz.agent.planner import PlanError, plan_from_task
 from aprendiz.agent.schemas import Plan
 from aprendiz.agent.structured import InvalidReply
@@ -177,43 +177,76 @@ class AgentRunner:
                 return resolved
             hoy_text, params = resolved
         actor: ActorAdapter = PixelJsonActor(trace.llm(llm, "actor"), self._settings, self._agent)
-        episode = Episode(
-            ctx=ctx,
-            agent=self._agent,
-            client=client,
-            actor=actor,
-            plan=plan,
-            params=params,
-            hoy_text=hoy_text,
-            trace=trace,
-            classifier_llm=classifier,
-            auditor_llm=trace.llm(llm, "auditor"),
-            detector_llm=trace.llm(llm, "detector"),
-            hints=await self._hints(ctx, llm, trace, first),
-        )
+        session = await self._open_session(ctx, llm, trace, first, plan, params)
         try:
-            last = await episode.run_execution()
-        except EndTask as end:
-            # A write already happened: never leave it unverified for lack of time.
-            if (
-                end.fin in ("actor_deadline", "error")
-                and plan.tipo in _WRITE_TYPES
-                and trace.writes_authorized > 0
-            ):
-                return await self._verify(
-                    ctx, plan, params, episode, trace, trace.llm(llm, "verificador"), end.fin
-                )
-            raise
-        if last.tipo == "fail":
-            return Finish.failed(
-                "fail", last.motivo or "el actor no pudo completar la tarea", last.datos_motivo
+            episode = Episode(
+                ctx=ctx,
+                agent=self._agent,
+                client=client,
+                actor=actor,
+                plan=plan,
+                params=params,
+                hoy_text=hoy_text,
+                trace=trace,
+                classifier_llm=classifier,
+                auditor_llm=trace.llm(llm, "auditor"),
+                detector_llm=trace.llm(llm, "detector"),
+                hints=session.hints,
+                notes=session,
             )
-        return await self._verify(ctx, plan, params, episode, trace, trace.llm(llm, "verificador"))
+            try:
+                last = await episode.run_execution()
+            except EndTask as end:
+                # A write already happened: never leave it unverified for lack of time.
+                # Timeout is not a bad procedure: do not invalidate.
+                if (
+                    end.fin in ("actor_deadline", "error")
+                    and plan.tipo in _WRITE_TYPES
+                    and trace.writes_authorized > 0
+                ):
+                    return await self._verify(
+                        ctx,
+                        plan,
+                        params,
+                        episode,
+                        trace,
+                        trace.llm(llm, "verificador"),
+                        end.fin,
+                        session,
+                        invalidate=False,
+                    )
+                raise
+            if last.tipo == "fail":
+                if session.hints:
+                    session.invalidate_used()
+                return Finish.failed(
+                    "fail", last.motivo or "el actor no pudo completar la tarea", last.datos_motivo
+                )
+            return await self._verify(
+                ctx,
+                plan,
+                params,
+                episode,
+                trace,
+                trace.llm(llm, "verificador"),
+                session=session,
+            )
+        finally:
+            session.close()
 
-    async def _hints(self, ctx: RunContext, llm: Llm, trace: TaskTrace, first) -> tuple[str, ...]:
-        """Current hints, or none. A memory failure must not fail the task."""
+    async def _open_session(
+        self,
+        ctx: RunContext,
+        llm: Llm,
+        trace: TaskTrace,
+        first,
+        plan: Plan,
+        params: dict[str, str],
+    ) -> MemorySession:
+        """Hints for this app, or an inert session. A memory failure must not fail the task."""
         if not self._settings.MEMORY_ENABLED:
-            return ()
+            return MemorySession(None, None)
+        store: AppMemory | None = None
         try:
             identity = await read_app_identity(
                 trace.llm(llm, "identidad"),
@@ -223,20 +256,30 @@ class AgentRunner:
                 deadline=ctx.actor_deadline,
             )
             if identity is None:
-                return ()
+                return MemorySession(None, None)
             store = AppMemory(self._settings.APP_MEMORY_DB)
-            try:
-                current = store.list_current(identity)
-            finally:
-                store.close()
+            current = store.list_current(identity)
         except (sqlite3.Error, OSError, MemoryRejected) as exc:
             log.warning("app memory unavailable", extra={"error": type(exc).__name__})
-            return ()
-        return render_hints(
-            current,
-            max_routes=self._agent.MEMORY_MAX_ROUTES,
-            max_procedures=self._agent.MEMORY_MAX_PROCEDURES,
-            max_chars=self._agent.MEMORY_HINT_CHARS,
+            if store is not None:
+                store.close()
+            return MemorySession(None, None)
+        values = [value for value in params.values() if value]
+        if plan.entidad:
+            values.append(plan.entidad)
+        for write in plan.escrituras_permitidas:
+            values.extend(write.campos.values())
+        return MemorySession(
+            store,
+            identity,
+            hints=render_hints(
+                current,
+                max_routes=self._agent.MEMORY_MAX_ROUTES,
+                max_procedures=self._agent.MEMORY_MAX_PROCEDURES,
+                max_chars=self._agent.MEMORY_HINT_CHARS,
+            ),
+            used_procedure_ids=tuple(item.procedure_id for item in current.procedures),
+            business_values=values,
         )
 
     async def _resolve_params(
@@ -270,6 +313,9 @@ class AgentRunner:
         trace: TaskTrace,
         verifier_llm: Llm,
         fin: Fin = "done",
+        session: MemorySession | None = None,
+        *,
+        invalidate: bool = True,
     ) -> Finish:
         # After a timeout there is no navigation: verify with what is on screen now.
         navigate = fin == "done"
@@ -297,12 +343,16 @@ class AgentRunner:
             deadline=ctx.deadline - 2,
         )
         if not result.verificado:
+            if invalidate and session is not None:
+                session.invalidate_used()
             return Finish(
                 "fallida",
                 fin,
                 "no se pudo verificar el resultado en pantalla",
                 [*result.no_verificable, *result.datos_motivo],
             )
+        if session is not None:
+            session.save_verified()
         return Finish(
             "terminada",
             fin,

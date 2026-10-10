@@ -10,6 +10,7 @@ from aprendiz.agent.memory import (
     AppMemory,
     MemoryHints,
     MemoryRejected,
+    MemorySession,
     render_hints,
 )
 from aprendiz.config import Settings
@@ -123,6 +124,49 @@ def test_render_hints_keeps_few_short_lines(tmp_path: Path) -> None:
     assert lines == ("Uno", "Dos", "Clientes > Nuevo: click, click")
     clipped = render_hints(current, max_routes=1, max_procedures=0, max_chars=2)
     assert clipped == ("U…",)
+
+
+def test_session_records_navigation_labels_and_action_types_only(tmp_path: Path) -> None:
+    store = AppMemory(tmp_path / "app_memory.sqlite3")
+    app = identity()
+    session = MemorySession(store, app, business_values=("valor-campo",))
+    session.note_navigation("Clientes")
+    session.note_action("click")
+    session.note_action("type")
+    session.remember_business("valor-campo")
+    session.note_navigation("valor-campo")
+    session.note_navigation("120, 40")
+    session.save_verified()
+    current = store.list_current(app)
+    assert [route.labels for route in current.routes] == [("Clientes",)]
+    assert [item.action_types for item in current.procedures] == [("click", "type")]
+    raw = (tmp_path / "app_memory.sqlite3").read_bytes()
+    assert b"valor-campo" not in raw
+    assert b"120" not in raw
+
+
+def test_session_invalidates_only_the_loaded_procedure(tmp_path: Path) -> None:
+    store = AppMemory(tmp_path / "app_memory.sqlite3")
+    app = identity()
+    used = store.save_procedure(app, ("Clientes",), ("click",))
+    other = store.save_procedure(app, ("Listado",), ("click",))
+    session = MemorySession(store, app, used_procedure_ids=(used,))
+    session.invalidate_used()
+    listed = {item.procedure_id for item in store.list_current(app).procedures}
+    assert used not in listed and other in listed
+
+
+def test_session_write_failure_does_not_raise(tmp_path: Path) -> None:
+    store = AppMemory(tmp_path / "app_memory.sqlite3")
+    app = identity()
+    session = MemorySession(
+        store, app, used_procedure_ids=("missing",), business_values=()
+    )
+    store.close()
+    session.note_navigation("Clientes")
+    session.note_action("click")
+    session.save_verified()
+    session.invalidate_used()
 
 
 def test_memory_is_enabled_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
