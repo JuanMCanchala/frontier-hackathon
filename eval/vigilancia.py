@@ -1,6 +1,7 @@
 """Initial-screen watch for the harness: capture-only comparison against the monitor's reference."""
 
 import asyncio
+import json
 import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field, replace
@@ -47,6 +48,8 @@ class InitialScreenWatch:
     thresholds: Thresholds = field(default_factory=Thresholds)
     now: Callable[[], datetime] = _now
     notices: list[str] = field(default_factory=list)  # run-level warnings, reported once
+    # Host of the desktop under test; a reference taken on another desktop is ignored.
+    desktop_host: str | None = None
     _tracker: Tracker | None = None
     _reference_checked: bool = False
 
@@ -54,7 +57,11 @@ class InitialScreenWatch:
         if not self._reference_checked:
             self._reference_checked = True
             path = self.base / "referencia" / f"{SCREEN}.png"
-            if path.is_file():
+            if path.is_file() and not self._same_desktop():
+                self.notices.append(
+                    "la referencia es de otro escritorio: no se vigila la pantalla inicial"
+                )
+            elif path.is_file():
                 self._tracker = Tracker({SCREEN: Image.open(path).convert("RGB")}, self.thresholds)
             else:
                 self.notices.append(
@@ -62,6 +69,13 @@ class InitialScreenWatch:
                     "no se vigila la pantalla inicial"
                 )
         return self._tracker
+
+    def _same_desktop(self) -> bool:
+        meta_path = self.base / "referencia" / "meta.json"
+        if self.desktop_host is None or not meta_path.is_file():
+            return True
+        reference_host = json.loads(meta_path.read_text(encoding="utf-8")).get("host")
+        return reference_host is None or reference_host == self.desktop_host
 
     async def check(self, test_id: str) -> list[str]:
         """Warnings for this test. Never raises: a failed capture must not break the run."""

@@ -24,6 +24,7 @@ import httpx
 
 from aprendiz.redact import redact
 from eval.desktop_lock import DesktopBusy, DesktopLock
+from eval.incidente import desktop_host
 from eval.report import Resultado, RunReport, render
 from eval.schema import LoadedTest, load_dir
 from eval.scoring import categoria, evaluate, verdict
@@ -380,7 +381,10 @@ async def run(args: argparse.Namespace, tests: list[LoadedTest], env: HarnessEnv
         watch = (
             None
             if args.sin_vigilancia
-            else InitialScreenWatch(vnc_capture(env.websocket_url, env.desktop_password))
+            else InitialScreenWatch(
+                vnc_capture(env.websocket_url, env.desktop_password),
+                desktop_host=desktop_host(env.websocket_url),
+            )
         )
         harness = Harness(env, desktop, api, router if env.openrouter_key else None, watch=watch)
         report = await harness.run_all(tests, args.repeticiones)
