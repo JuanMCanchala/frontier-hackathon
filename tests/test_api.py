@@ -427,13 +427,14 @@ async def test_context_carries_both_deadlines(tmp_path: Path) -> None:
             seen.append(ctx)
             return RunResult(estado="terminada", resumen="ok")
 
-    settings = make_settings(str(tmp_path / "t.db"), deadline=260)
+    settings = make_settings(str(tmp_path / "t.db"), deadline=285)
     manager = TaskManager(settings, Spy())
     before = time.monotonic()
     task_id = await manager.submit("x", Escritorio(url="ws://h:1/x", password="p"))
     while (await manager.status(task_id)).estado == "en_curso":  # type: ignore[union-attr]
         await asyncio.sleep(0.005)
     ctx = seen[0]
-    assert 219.9 <= ctx.actor_deadline - before <= 220.5
-    assert 259.9 <= ctx.deadline - before <= 260.5
+    actor_s, deadline_s = settings.ACTOR_STOP_S, settings.TASK_DEADLINE_S
+    assert actor_s - 0.1 <= ctx.actor_deadline - before <= actor_s + 0.5
+    assert deadline_s - 0.1 <= ctx.deadline - before <= deadline_s + 0.5
     await manager.shutdown()

@@ -14,8 +14,8 @@ class Settings(BaseSettings):
     TEAM_TOKEN: str
     ACTOR_MODEL: str = "anthropic/claude-haiku-5.5"
     PLANNER_MODEL: str = "anthropic/claude-sonnet-5.5"
-    ACTOR_STOP_S: float = 220
-    TASK_DEADLINE_S: float = 260
+    ACTOR_STOP_S: float = 250
+    TASK_DEADLINE_S: float = 285
     TASK_BUDGET_USD: float = 0.15
     GLOBAL_BUDGET_USD: float = 30
     TRACES_DIR: str = "traces"
