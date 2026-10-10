@@ -89,3 +89,10 @@ def test_fill_form_field_type_defaults_to_text_and_accepts_select():
             tipo="fill_form",
             campos=[{"x": 1, "y": 2, "etiqueta": "a", "valor": "b", "tipo": "radio"}],
         )
+
+
+def test_memo_is_short_and_optional():
+    assert Action(tipo="wait", memo="page 2: 20 counted").memo == "page 2: 20 counted"
+    assert Action(tipo="wait").memo is None
+    with pytest.raises(ValidationError):
+        Action(tipo="wait", memo="x" * 301)

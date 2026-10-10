@@ -26,6 +26,22 @@ class Escritura(_Closed):
     campos: dict[str, str] = Field(default_factory=dict)
 
 
+class Consulta(_Closed):
+    """Structured criterion of a count or sum question: the code filters and adds, not a model."""
+
+    operacion: Literal["conteo", "suma"]
+    entidad: str | None = None  # exactly as in the task
+    columna_entidad: str | None = None
+    filtros: dict[str, str] = Field(default_factory=dict)  # column -> value, e.g. Estado: vencida
+    columna_suma: str | None = None
+
+    @model_validator(mode="after")
+    def _sum_needs_column(self) -> Self:
+        if self.operacion == "suma" and not self.columna_suma:
+            raise ValueError("suma requires columna_suma")
+        return self
+
+
 class Plan(_Closed):
     tipo: TipoPlan
     sospechosa: bool = False
@@ -34,6 +50,7 @@ class Plan(_Closed):
     # name -> expression the code resolves after reading the screen, e.g. "hoy_app+1"
     parametros: dict[str, str] = Field(default_factory=dict)
     dato_pedido: list[str] = Field(default_factory=list)
+    consulta: Consulta | None = None  # only for count or sum questions over a list
 
 
 class Campo(_Closed):
@@ -60,6 +77,8 @@ class Action(_Closed):
     campos: list[Campo] | None = None
     postcondicion: str | None = None
     razon: str = ""
+    # The actor's own notes to itself (e.g. a running count). Never shown to the gate.
+    memo: str | None = Field(default=None, max_length=300)
     respuesta: list[str] | None = None
     motivo: str | None = None
     datos_motivo: list[str] = Field(default_factory=list)
