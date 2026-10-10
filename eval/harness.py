@@ -2,6 +2,7 @@
 
 Usage: uv run --env-file .env python -m eval.harness --pruebas DIR [--pruebas DIR2]
        [--solo E1,V3] [--repeticiones N] [--etiqueta texto] [--api URL] [--dry-run]
+       [--sin-vigilancia]
 Secrets and URLs come from the environment (see HarnessEnv), never from arguments.
 """
 
@@ -26,6 +27,7 @@ from eval.desktop_lock import DesktopBusy, DesktopLock
 from eval.report import Resultado, RunReport, render
 from eval.schema import LoadedTest, load_dir
 from eval.scoring import categoria, evaluate, verdict
+from eval.vigilancia import InitialScreenWatch, vnc_capture
 
 log = logging.getLogger("eval.harness")
 
@@ -119,9 +121,11 @@ class Harness:
         timings: Timings | None = None,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
         clock: Callable[[], float] = time.monotonic,
+        watch: InitialScreenWatch | None = None,
     ) -> None:
         self._env, self._desktop, self._api, self._or = env, desktop, api, openrouter
         self._t, self._sleep, self._clock = timings or Timings(), sleep, clock
+        self._watch = watch
 
     # ---- desktop ---------------------------------------------------------
 
@@ -207,6 +211,8 @@ class Harness:
         r = Resultado(test.test_id, test.source, categoria(prueba), repeticion)
         try:
             await self.reset_desktop()
+            if self._watch is not None:
+                r.avisos += await self._watch.check(test.test_id)
             r.task_id, r.post_latencia_s = await self._post_task(prueba.instruccion)
             r.post_lento = r.post_latencia_s >= self._t.post_limit_s
             started = self._clock()
@@ -266,6 +272,8 @@ class Harness:
                     attempted = True
                     report.resultados.append(await self.run_one(test, rep))
         finally:
+            if self._watch is not None:
+                report.avisos.extend(self._watch.notices)
             if attempted:
                 await self._final_reset(report)
         return report
@@ -347,6 +355,11 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument("--etiqueta", default="")
     parser.add_argument("--api", default="http://127.0.0.1:8000")
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument(
+        "--sin-vigilancia",
+        action="store_true",
+        help="no comparar la pantalla inicial con la referencia antes de cada prueba",
+    )
     args = parser.parse_args(argv)
     if args.repeticiones < 1:
         parser.error("--repeticiones debe ser >= 1")
@@ -364,7 +377,12 @@ async def run(args: argparse.Namespace, tests: list[LoadedTest], env: HarnessEnv
             headers=auth(env.openrouter_key) if env.openrouter_key else {}, timeout=15
         ) as router,
     ):
-        harness = Harness(env, desktop, api, router if env.openrouter_key else None)
+        watch = (
+            None
+            if args.sin_vigilancia
+            else InitialScreenWatch(vnc_capture(env.websocket_url, env.desktop_password))
+        )
+        harness = Harness(env, desktop, api, router if env.openrouter_key else None, watch=watch)
         report = await harness.run_all(tests, args.repeticiones)
     print(redact(render(report), env.secrets))
     path = write_results(report, args.etiqueta, env.secrets, RESULTS_DIR, datetime.now())
