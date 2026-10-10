@@ -1,0 +1,131 @@
+"""The app's "Today": read from the header as text by a model, parsed and computed by code."""
+
+import logging
+import re
+import unicodedata
+from datetime import date, timedelta
+
+from PIL import Image
+from pydantic import BaseModel, ConfigDict
+
+from aprendiz.agent.fallback import ask_json_fb
+from aprendiz.agent.llm import Llm, LlmError, Message
+from aprendiz.agent.structured import InvalidReply
+
+log = logging.getLogger(__name__)
+
+TODAY_SYSTEM_PROMPT = """\
+You read a desktop app screenshot. Find the current date the app shows in its header, usually
+labelled "Hoy" or "Today". Reply with ONE JSON object: {"texto": "<the date text, copied exactly>"}
+or {"texto": null} if no such date is visible. Copy the characters as shown; do not reformat,
+convert or compute anything.
+"""
+
+_MONTHS = {
+    "enero": 1, "febrero": 2, "marzo": 3, "abril": 4, "mayo": 5, "junio": 6, "julio": 7,
+    "agosto": 8, "septiembre": 9, "setiembre": 9, "octubre": 10, "noviembre": 11,
+    "diciembre": 12,
+}  # fmt: skip
+_WEEKDAYS = {
+    "lunes": 0, "martes": 1, "miercoles": 2, "jueves": 3, "viernes": 4, "sabado": 5, "domingo": 6,
+}  # fmt: skip
+_NUMERIC = re.compile(r"(\d{1,4})[/\-.](\d{1,2})[/\-.](\d{1,4})")
+_WORDED = re.compile(r"(\d{1,2})\s+(?:de\s+)?([a-z]+)\.?\s+(?:de\s+)?(\d{4})")
+_OFFSET = re.compile(r"hoy_app(?:\s*([+-])\s*(\d+))?")
+_WEEKDAY_EXPR = re.compile(r"(proximo|anterior)_([a-z]+)")
+
+
+class ParamError(ValueError):
+    """A plan parameter expression the code cannot resolve."""
+
+
+class _Reply(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    texto: str | None
+
+
+def _fold(text: str) -> str:
+    stripped = unicodedata.normalize("NFD", text.lower())
+    return "".join(c for c in stripped if unicodedata.category(c) != "Mn").strip()
+
+
+def parse_date_text(text: str) -> date | None:
+    """Parse the date formats a Spanish-language app shows. Numeric dates are day-first."""
+    folded = _fold(text)
+    try:
+        numeric = _NUMERIC.search(folded)
+        if numeric:
+            a, b, c = (int(g) for g in numeric.groups())
+            if len(numeric.group(1)) == 4:
+                return date(a, b, c)
+            return date(c, b, a)
+        worded = _WORDED.search(folded)
+        if worded and worded.group(2) in _MONTHS:
+            return date(int(worded.group(3)), _MONTHS[worded.group(2)], int(worded.group(1)))
+        # "10 oct 2026"
+        if worded:
+            for name, month in _MONTHS.items():
+                if name.startswith(worded.group(2)) and len(worded.group(2)) >= 3:
+                    return date(int(worded.group(3)), month, int(worded.group(1)))
+    except ValueError:
+        return None
+    return None
+
+
+async def read_today(
+    llm: Llm,
+    screenshot: Image.Image,
+    *,
+    model: str,
+    fallback: str | None = None,
+    deadline: float | None = None,
+) -> date | None:
+    """None when the date is not visible or cannot be parsed as a real date."""
+    messages: list[Message] = [
+        {"role": "system", "content": TODAY_SYSTEM_PROMPT},
+        {"role": "user", "content": "Read the date."},
+    ]
+    try:
+        reply = await ask_json_fb(
+            llm,
+            model,
+            fallback,
+            messages,
+            _Reply,
+            images=[screenshot],
+            max_tokens=60,
+            deadline=deadline,
+        )
+    except (LlmError, InvalidReply) as exc:
+        log.warning("could not read today", extra={"error": str(exc)})
+        return None
+    if reply.texto is None:
+        return None
+    parsed = parse_date_text(reply.texto)
+    if parsed is None:
+        log.warning("unparseable date text", extra={"texto": reply.texto})
+    return parsed
+
+
+def _resolve(expression: str, hoy: date) -> date:
+    expr = _fold(expression)
+    offset = _OFFSET.fullmatch(expr)
+    if offset:
+        days = int(offset.group(2) or 0)
+        return hoy + timedelta(days=-days if offset.group(1) == "-" else days)
+    weekday = _WEEKDAY_EXPR.fullmatch(expr)
+    if weekday and weekday.group(2) in _WEEKDAYS:
+        target = _WEEKDAYS[weekday.group(2)]
+        if weekday.group(1) == "proximo":
+            return hoy + timedelta(days=(target - hoy.weekday() - 1) % 7 + 1)
+        return hoy - timedelta(days=(hoy.weekday() - target - 1) % 7 + 1)
+    raise ParamError(f"unsupported parameter expression: {expression!r}")
+
+
+def resolve_params(parametros: dict[str, str], hoy: date) -> dict[str, date]:
+    """Resolve every plan parameter against the app's date; the arithmetic is code, not a model.
+
+    "proximo_<weekday>" is the first such day strictly after today; "anterior_<weekday>" the last
+    one strictly before.
+    """
+    return {name: _resolve(expr, hoy) for name, expr in parametros.items()}
