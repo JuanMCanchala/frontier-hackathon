@@ -20,7 +20,7 @@ from aprendiz.agent.trace import TaskTrace
 from aprendiz.agent.verifier import Captura, TipoVerificacion, verify
 from aprendiz.config import Settings, VncTimings
 from aprendiz.models import RunContext, RunResult
-from aprendiz.vnc import VncClient, VncError
+from aprendiz.vnc import VncClient, VncError, VncGarbledGreeting
 
 log = logging.getLogger(__name__)
 
@@ -147,20 +147,20 @@ class AgentRunner:
     # ---- phases ---------------------------------------------------------------
 
     async def _connect(self, ctx: RunContext, client: VncClient) -> None:
-        """One retry when the desktop is slow to answer: the practice desktop timed out on the
-        handshake now and then, and a single timeout used to end the task as an internal error.
-        A wrong password or a protocol error is not retried."""
+        """One retry when the desktop is slow or garbled: the practice desktop timed out on the
+        handshake now and then, or answered without an RFB greeting, and that used to end the
+        task. A wrong password or any other protocol error is not retried."""
         try:
             await client.connect(ctx.escritorio.url, ctx.escritorio.password)
             return
-        except (TimeoutError, OSError) as exc:
+        except (TimeoutError, OSError, VncGarbledGreeting) as exc:
             if time.monotonic() > ctx.deadline - CONNECT_RETRY_MARGIN_S:
                 raise VncError(f"el escritorio no respondió al conectar: {exc!r}") from exc
             log.warning("vnc connect failed, retrying once", extra={"error": repr(exc)})
         await asyncio.sleep(CONNECT_RETRY_PAUSE_S)
         try:
             await client.connect(ctx.escritorio.url, ctx.escritorio.password)
-        except (TimeoutError, OSError) as exc:
+        except (TimeoutError, OSError, VncGarbledGreeting) as exc:
             raise VncError(f"el escritorio no respondió al conectar: {exc!r}") from exc
 
     async def _run_task(

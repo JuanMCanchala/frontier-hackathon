@@ -12,7 +12,7 @@ from PIL import Image
 from websockets.asyncio.client import ClientConnection, connect
 
 from aprendiz.config import VncTimings
-from aprendiz.vnc.errors import VncError
+from aprendiz.vnc.errors import VncError, VncGarbledGreeting
 from aprendiz.vnc.keys import KEYSYM_RETURN, KEYSYM_TAB, keysym_for_char, parse_combo
 from aprendiz.vnc.lease import Lease
 
@@ -123,7 +123,7 @@ class VncClient:
     async def _handshake(self, password: str) -> None:
         version = await self._read(12)
         if not version.startswith(b"RFB 003."):
-            raise VncError(f"unexpected server version: {version!r}")
+            raise VncGarbledGreeting(f"unexpected server version: {version!r}")
         await self._send(b"RFB 003.008\n")
 
         count = (await self._read(1))[0]

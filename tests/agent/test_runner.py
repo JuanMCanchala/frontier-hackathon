@@ -10,7 +10,7 @@ from aprendiz.agent.config import AgentSettings
 from aprendiz.agent.runner import AgentRunner
 from aprendiz.config import Settings, VncTimings
 from aprendiz.models import Escritorio, RunContext
-from aprendiz.vnc import Lease
+from aprendiz.vnc import Lease, VncGarbledGreeting
 from tests.agent.fakes import RoutedLlm, act, plan_json
 from tests.fake_server import PASSWORD, FakeRfbServer
 
@@ -1128,7 +1128,13 @@ async def test_retrying_the_same_fill_on_the_same_form_does_not_pay_the_auditor_
     assert llm.count("auditor") == 1
 
 
-async def test_a_slow_desktop_handshake_is_retried_once(server, settings, tmp_path, monkeypatch):
+@pytest.mark.parametrize(
+    "first_failure",
+    [TimeoutError(), VncGarbledGreeting("unexpected server version: b'45!\\xff45!\\xff'")],
+)
+async def test_a_slow_or_garbled_desktop_handshake_is_retried_once(
+    server, settings, tmp_path, monkeypatch, first_failure
+):
     """The practice desktop timed out on connect now and then; that ended the task as an
     internal error."""
     from aprendiz.agent import runner as runner_mod
@@ -1141,7 +1147,7 @@ async def test_a_slow_desktop_handshake_is_retried_once(server, settings, tmp_pa
         nonlocal calls
         calls += 1
         if calls == 1:
-            raise TimeoutError
+            raise first_failure
         await real(self, url, password)
 
     monkeypatch.setattr(VncClient, "connect", flaky)
