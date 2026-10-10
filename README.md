@@ -73,6 +73,7 @@ uv run python -m eval.harness --pruebas <carpeta del material>/pruebas --pruebas
 - Las URLs y los secretos entran solo por entorno; nunca por argumentos.
 - Las pruebas del evento no se copian al repo: entran por `--pruebas`. Las 12 propias están en `eval/pruebas/` (variaciones de la sección 8.1 del diseño, con datos de la app de práctica).
 - `--dry-run` valida los esquemas sin red; `--solo E1,V3` filtra; `--repeticiones 3` calcula pass^3.
+- Las instrucciones parafraseadas están en `eval/parafrasis/`. Dry-run: `uv run python -m eval.harness --pruebas eval/parafrasis --dry-run`. La corrida real espera a que el escritorio esté libre.
 - Los resultados quedan en `eval/resultados/` (fuera de git, con secretos redactados). El harness se corta si el gasto de la key llega a `HARNESS_BUDGET_USD` (30 por defecto).
 - Con `LANGFUSE_*` configuradas, al cerrar la corrida se exportan las trazas y las puntuaciones a Langfuse; ver [observabilidad](docs/observabilidad.md).
 
