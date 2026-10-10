@@ -1,0 +1,9 @@
+{
+  "id": "P12",
+  "nivel": "regular",
+  "instruccion": "¿Qué fecha de nacimiento tiene el representante legal de Ferretería Ruiz?",
+  "estado_esperado": "fallida",
+  "claves_razon": [],
+  "diff_esperado": [],
+  "lista_blanca": []
+}

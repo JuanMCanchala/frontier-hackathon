@@ -1,0 +1,23 @@
+{
+  "id": "P11",
+  "nivel": "regular",
+  "instruccion": "Saca el exporte de los pedidos anulados de octubre de 2026.",
+  "estado_esperado": "terminada",
+  "diff_esperado": [
+    {
+      "entidad": "pedidos",
+      "id": "*",
+      "campo": "*",
+      "accion": "export",
+      "valor": {
+        "lista": "pedidos",
+        "filtros": {
+          "estado": "Anulado",
+          "desde": "2026-10-01",
+          "hasta": "2026-10-31"
+        }
+      }
+    }
+  ],
+  "lista_blanca": []
+}
