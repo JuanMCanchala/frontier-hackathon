@@ -8,7 +8,7 @@ Contexto y reglas de trabajo para este repo. Léelo completo antes de cada tarea
 - Entrypoint: servicio HTTP con `GET /health`, `POST /tasks` (responde `task_id` en < 2 s) y `GET /tasks/{task_id}` (`estado`, `resumen`). Bearer token en todas las llamadas.
 - Cómo correr: `uv sync`, copiar `.env.example` a `.env` y rellenar los secretos; luego `uv run aprendiz-api` (lee `HOST`/`PORT` del entorno, 8000 por defecto) o `uv run uvicorn aprendiz.api:app --port ${PORT:-8000}`. Los `Settings` se cargan al arrancar y fallan si faltan `OPENROUTER_API_KEY` o `TEAM_TOKEN`. Por ahora el runner por defecto responde `fallida` (agente sin implementar).
 - Cómo testear: `uv run pytest -q` (offline: servidor RFB falso y runner falso inyectado) y `uv run ruff check src tests eval`. Humo contra el escritorio real, solo lectura: `uv run python eval/smoke_driver.py` con `DESKTOP_URL` y `DESKTOP_PASSWORD`. Ruff solo sobre `src tests eval`; nunca `format` ni `--fix` sobre `experiments/` ni `docs/`.
-- Harness de evaluación: pendiente (reset → tarea → check sobre el escritorio de pruebas)
+- Harness de evaluación: `uv run --env-file .env python -m eval.harness --pruebas DIR [--pruebas DIR2] [--solo E1,V3] [--repeticiones N] [--etiqueta texto] [--api http://127.0.0.1:8000] [--dry-run]`. Por tarea: reset → POST /tasks → polling → /__check → reglas de `eval/scoring.py`. Secretos y URLs solo por entorno (`DESKTOP_URL` base http(s), `DESKTOP_PASSWORD`, `DESKTOP_TOKEN`, `TEAM_TOKEN`, `OPENROUTER_API_KEY`, `HARNESS_BUDGET_USD`, `TRACES_DIR`). Las pruebas del evento entran siempre por `--pruebas` y no se copian al repo. Resultados en `eval/resultados/` (ignorado por git, con secretos redactados). `--dry-run` solo valida esquemas.
 
 ## Cómo trabajamos
 
