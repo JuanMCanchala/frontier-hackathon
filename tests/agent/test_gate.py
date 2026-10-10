@@ -504,3 +504,21 @@ async def test_a_filter_option_naming_the_task_configures_a_read_only_plan():
     assert (await run(FakeLlm([]), plan=plan, accion=action, evidencia=evidencia)).decision == (
         "permitir"
     )
+
+
+async def test_an_exports_filters_from_the_task_are_not_writes():
+    """Official run: "Estado: Entregado" in a report's filters was denied as outside the plan."""
+    action = Action(
+        tipo="fill_form",
+        campos=[{"x": 1, "y": 1, "etiqueta": "Estado", "valor": "Entregado", "tipo": "texto"}],
+    )
+    evidencia = ev(tarea="Exporta el reporte de pedidos entregados de septiembre")
+    llm = FakeLlm([])
+    verdict = await run(llm, plan=EXPORT_PLAN, accion=action, evidencia=evidencia)
+    assert verdict.decision == "permitir" and llm.calls == []
+    invented = Action(
+        tipo="fill_form",
+        campos=[{"x": 1, "y": 1, "etiqueta": "Estado", "valor": "Anulado", "tipo": "texto"}],
+    )
+    denied = await run(FakeLlm([]), plan=EXPORT_PLAN, accion=invented, evidencia=evidencia)
+    assert denied.decision == "denegar_corregible"
