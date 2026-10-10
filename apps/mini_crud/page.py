@@ -13,9 +13,10 @@ def render(store: Store) -> str:
         for record in records
     )
     return f"""<!DOCTYPE html>
-<html lang="es">
+<html lang="es" translate="no">
 <head>
   <meta charset="utf-8">
+  <meta name="google" content="notranslate">
   <title>{html.escape(config.APP_NAME)}</title>
   <style>
     body {{ font-family: system-ui, sans-serif; margin: 0; }}

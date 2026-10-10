@@ -53,6 +53,9 @@ def test_seed_has_homonyms_and_an_order_in_a_note():
 
 def test_page_shows_header_and_save_notice():
     html = render(Store())
+    assert 'lang="es"' in html
+    assert 'translate="no"' in html
+    assert 'content="notranslate"' in html
     assert "Taller Norte" in html
     assert "0.3" in html
     assert "Hoy" in html
