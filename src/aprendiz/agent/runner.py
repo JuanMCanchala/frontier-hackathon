@@ -282,6 +282,15 @@ class AgentRunner:
             return Finish.failed(
                 fin, "el actor declaró terminar sin que se autorizara ninguna escritura", notes
             )
+        if plan.tipo in ("crear", "editar") and episode.persist_shot is None:
+            # A form that stays open after "Aplicar" still shows the typed value, saved or not:
+            # the verifier took that for a save (a false success on the v4.2 theme). A create or
+            # edit is only reported done if the effect detector saw a persistence signal.
+            return Finish.failed(
+                fin,
+                "no apareció ninguna señal de guardado después de la escritura",
+                [f"notas del actor: {episode.memo}"] if episode.memo else [],
+            )
         if time.monotonic() >= ctx.deadline - self._agent.VERIFY_RESERVE_S:
             return Finish.failed(fin, "no quedó tiempo para verificar el resultado")
         finales = await episode.run_verification() if navigate else episode.static_evidence()
