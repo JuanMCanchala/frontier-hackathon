@@ -1,0 +1,9 @@
+{
+  "id": "P2",
+  "nivel": "regular",
+  "instruccion": "¿Cuántos pedidos hay con fecha del día anterior a Hoy?",
+  "estado_esperado": "terminada",
+  "respuesta_esperada": "2",
+  "diff_esperado": [],
+  "lista_blanca": []
+}

@@ -1,0 +1,16 @@
+{
+  "id": "P3",
+  "nivel": "regular",
+  "instruccion": "Modifica la fecha del pedido PD-0143 para que sea el día siguiente a Hoy.",
+  "estado_esperado": "terminada",
+  "diff_esperado": [
+    {
+      "entidad": "pedidos",
+      "id": "PD-0143",
+      "campo": "fecha",
+      "accion": "update",
+      "valor": "2026-10-15"
+    }
+  ],
+  "lista_blanca": []
+}
