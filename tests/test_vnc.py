@@ -54,12 +54,13 @@ async def test_pointer_event_bytes(server: FakeRfbServer, client: VncClient) -> 
     await client.click(10, 20, button="right")
     await settle()
     events = [e for _, e in server.pointer_events]
-    assert events[0] == bytes([0]) + struct.pack(">HH", 300, 200)
-    assert events[1:4] == [
-        bytes([0]) + struct.pack(">HH", 10, 20),
-        bytes([4]) + struct.pack(">HH", 10, 20),
-        bytes([0]) + struct.pack(">HH", 10, 20),
-    ]
+    at = [(e[0], *struct.unpack(">HH", e[1:5])) for e in events]
+    move_end = at.index((0, 300, 200))
+    assert at[-3:] == [(0, 10, 20), (4, 10, 20), (0, 10, 20)]
+    # The pointer glides there, along the current row first (hover menus survive the trip).
+    glide = at[move_end + 1 : -3]
+    assert glide and all(mask == 0 for mask, _, _ in glide)
+    assert glide[0][2] == 200 and glide[0][1] < 300
 
 
 async def test_click_holds_at_least_150ms(server: FakeRfbServer, client: VncClient) -> None:

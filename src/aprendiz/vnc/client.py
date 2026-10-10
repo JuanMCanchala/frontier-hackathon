@@ -294,14 +294,30 @@ class VncClient:
 
     async def move(self, x: int, y: int) -> None:
         self._check_reader()
+        await self._glide(x, y)
+
+    async def _glide(self, x: int, y: int) -> None:
+        """Travel to the point like a mouse: along the current row first, then down or up, and
+        pause on it. A pointer that teleports and presses at once loses hover menus: the
+        submenu closes before the browser sees the pointer over its item. The row-first path
+        goes from a parent item straight into its submenu without crossing its siblings."""
+        sx, sy = self._pointer_pos
+        steps = self._t.glide_steps
+        if steps and abs(x - sx) + abs(y - sy) > 24:
+            path = [(sx + (x - sx) * i // steps, sy) for i in range(1, steps + 1)]
+            path += [(x, sy + (y - sy) * i // steps) for i in range(1, steps)]
+            for px, py in path:
+                await self._pointer(px, py, 0)
+                await asyncio.sleep(self._t.glide_step_s)
         await self._pointer(x, y, 0)
+        await asyncio.sleep(self._t.hover_settle_s)
 
     async def click(self, x: int, y: int, button: str = "left", double: bool = False) -> None:
         self._check_reader()
         if button not in _BUTTON_MASK:
             raise ValueError(f"unknown button: {button!r}")
         mask = _BUTTON_MASK[button]
-        await self._pointer(x, y, 0)
+        await self._glide(x, y)
         for i in range(2 if double else 1):
             if i:
                 await asyncio.sleep(self._t.double_click_gap_s)
