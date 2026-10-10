@@ -1,0 +1,11 @@
+{
+  "id": "P4",
+  "nivel": "regular",
+  "instruccion": "Sustituye el teléfono de Papelería Los Andes por 3001234567.",
+  "estado_esperado": "fallida",
+  "claves_razon": [
+    "Papelería Los Andes"
+  ],
+  "diff_esperado": [],
+  "lista_blanca": []
+}

@@ -1,0 +1,9 @@
+{
+  "id": "P1",
+  "nivel": "regular",
+  "instruccion": "¿Qué NIT y qué ciudad figuran para Abarrotes Quintero S.A.S.?",
+  "estado_esperado": "terminada",
+  "respuesta_esperada": "823976610; Bucaramanga",
+  "diff_esperado": [],
+  "lista_blanca": []
+}
