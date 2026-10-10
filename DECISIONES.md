@@ -1,3 +1,9 @@
+## 2026-10-10 13:40 — A main por PR desde Bustamante
+Contexto: el push directo a `main` lo rechaza GitHub (GH006): la rama está protegida y exige el check `ci`, que solo corre en un PR.
+Decisión: todo termina en `main`, pero entra por la rama `Bustamante` y un PR hacia `main` que se mergea cuando `ci` pasa. Reemplaza la decisión de commits directos a `main` de las 13:19.
+Descartado: pedir al dueño que quite la exigencia de `ci` — no depende de nosotros y quita una red de seguridad. Saltar la protección con admin — prohibido sin aprobación explícita.
+Consecuencias: `ci` valida cada integración; entre el push y el merge hay una espera. `Bustamante` debe mantenerse al día con `main` para que el PR no choque.
+
 ## 2026-10-10 13:19 — Commits directos a main
 Contexto: la rama `Bustamante` la empujaba más de una persona y cada push dejaba de ser fast-forward.
 Decisión: todos los commits van a `main`, con `git pull --ff-only` antes y push fast-forward después. No se abre rama ni PR por tarea. Sigue prohibido el push o merge forzado sin aprobación previa y una indicación explícita después.

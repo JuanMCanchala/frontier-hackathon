@@ -23,12 +23,12 @@ Contexto y reglas de trabajo para este repo. Léelo completo antes de cada tarea
 
 Este repo es de JuanMCanchala (`JuanMCanchala/frontier-hackathon`). Colaboramos con permiso de escritura; no somos dueños.
 
-- Todos los commits van a `main`. No abras rama ni pull request por tarea: compartir una rama aparte fue lo que generó conflictos.
-- Antes de editar, `git pull --ff-only origin main`. Si no puede avanzar en fast-forward, integra con merge y no reescribas historia publicada. Si el conflicto no se resuelve con lo que dicen los dos lados, para y pregunta.
-- Todos los pushes van a `origin/main`. Nunca hagas push a otra rama.
-- Si `main` está atrasado respecto a la rama `Bustamante` (`git fetch origin` y `git log main..origin/Bustamante` muestra commits), haz merge de `origin/Bustamante` en `main` solo si es sano: sin conflictos que no se resuelvan con lo que dicen los dos lados, y con `uv run pytest -q` y `uv run ruff check src tests eval` en verde después del merge. Si no es sano, no lo integres: para y pregunta con la salida exacta.
+- Todo el trabajo termina en `main`. `main` está protegido y exige el check `ci`, así que no acepta push directo: el camino es la rama `Bustamante` y un pull request hacia `main`.
+- Antes de editar, `git fetch origin` y trabaja en `Bustamante` al día con `origin/main` y `origin/Bustamante`. Si `Bustamante` está atrasada respecto a `main`, haz merge de `origin/main` en ella; no reescribas historia publicada. Si el conflicto no se resuelve con lo que dicen los dos lados, para y pregunta.
+- Si `main` está atrasado respecto a `Bustamante` (`git log origin/main..origin/Bustamante` muestra commits), intégralo en `main` si es sano: sin conflictos que no se resuelvan con lo que dicen los dos lados, y con `uv run pytest -q` y `uv run ruff check src tests eval` en verde. Si no es sano, no lo integres: para y pregunta con la salida exacta.
+- Push a `origin/Bustamante`, siempre fast-forward. Si hay un PR abierto de `Bustamante` hacia `main`, los commits entran ahí; si no, ábrelo con `gh`. Cuando `ci` pase, mergea el PR a `main` sin saltar reglas.
 - Cada tarea la ejecuta un solo agente. Ese agente hace solo los commits de su tarea: un cambio, un propósito, sin mezclar tareas ajenas en el mismo commit.
-- El push a `origin/main` es siempre fast-forward. Si lo rechazan, vuelve a integrar y reintenta. No cambies de rama para rodear el fallo.
+- Si el push o el merge del PR fallan, vuelve a integrar y reintenta. Si fallan por permisos o por `ci` en rojo, para y dilo con la salida exacta; no uses otra rama para rodear el fallo.
 - Nunca hagas push forzado ni merge forzado (`--force`, `--force-with-lease`, `push -f`, merge con admin o saltando reglas). Solo si yo apruebo primero y, después de esa aprobación, te doy la indicación explícita. Sin las dos, ni lo intentes.
 
 ## Estándar de código
@@ -62,5 +62,5 @@ Consecuencias: <qué se vuelve más fácil / más difícil>
 
 - Commits pequeños y atómicos, en español, en imperativo y con prefijo convencional: `feat:`, `fix:`, `test:`, `docs:`, `refactor:`, `chore:`.
 - El mensaje explica el porqué cuando no es obvio. Sin firmas, sin trailers y sin texto generado de relleno.
-- Cada commit de una tarea va a `main`, hecho por el agente de esa tarea. Commit y push fast-forward a `origin/main` forman parte de ejecutar la tarea. No reescribas historia publicada.
+- Cada commit de una tarea lo hace el agente de esa tarea. Commit, push fast-forward a `origin/Bustamante` y merge del PR a `main` con `ci` en verde forman parte de ejecutar la tarea. No reescribas historia publicada.
 - Push forzado y merge forzado están prohibidos salvo aprobación mía seguida de una indicación explícita.
