@@ -1,0 +1,9 @@
+{
+  "id": "PV2",
+  "nivel": "regular",
+  "instruccion": "Indícame cuántos pedidos están con fecha de ayer.",
+  "estado_esperado": "terminada",
+  "respuesta_esperada": "2",
+  "diff_esperado": [],
+  "lista_blanca": []
+}

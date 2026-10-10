@@ -1,0 +1,9 @@
+{
+  "id": "PV7",
+  "nivel": "dificil",
+  "instruccion": "¿Me indicas la dirección de Distribuciones El Faro?",
+  "estado_esperado": "terminada",
+  "respuesta_esperada": "Carrera 15 # 85-40",
+  "diff_esperado": [],
+  "lista_blanca": []
+}
