@@ -1,3 +1,9 @@
+## 2026-10-10 13:16 — Langfuse al cerrar las trazas locales, no en el núcleo
+Contexto: hace falta agrupar trazas y puntuaciones para comparar corridas, sin retrasar el planificador ni sacar capturas del volumen.
+Decisión: un solo exportador, Langfuse auto-hospedado, como componente más. Entra al cerrar el hito de las 14:00 y antes del A/B de las 15:00; si los controles no cumplieron, se mueve a las 17:00–17:45 y no retrasa el A/B. Reenvía la traza local ya redactada. Módulo cliente propio, configuración en un solo sitio, timeout y reintentos acotados. Si falta configuración o falla, la tarea sigue y manda el archivo local. No autoriza acciones.
+Descartado: LangSmith y Langfuse juntos — se pisan. LangSmith — el stack no es LangChain y su nube sacaría capturas. Meterlo en el hito de las 13:15 — aún no hay traza que exportar y retrasa el planificador.
+Consecuencias: el A/B puede comparar corridas fuera del volumen solo si el exportador cupo a las 14:45. Hasta entonces la fuente de verdad sigue siendo la traza local.
+
 ## 2026-10-10 13:12 — Sin push ni merge forzado
 Contexto: un push o merge forzado puede reescribir historia compartida o saltarse las reglas del repo ajeno.
 Decisión: prohibido `--force`, `--force-with-lease`, `push -f` y cualquier merge forzado o de admin. Solo procede si Bustamante aprueba primero y, después, da la indicación explícita.
