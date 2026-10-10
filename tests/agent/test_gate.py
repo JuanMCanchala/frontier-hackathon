@@ -405,6 +405,33 @@ async def test_a_name_still_needs_a_search():
     assert verdict.decision == "denegar_corregible" and "searched" in verdict.motivo
 
 
+async def test_unique_visible_entity_skips_explicit_search():
+    """When the auditor reports exactly one candidate matching the plan entity,
+    the current screen is evidence enough that a search/filter was done."""
+    llm = FakeLlm([
+        reply(escritura="update", candidatos=[
+            {"nombre": "Ana Pérez", "dato_distintivo": "doc 1"}
+        ])
+    ])
+    verdict = await run(llm, evidencia=ev(search=False))
+    assert verdict.decision == "permitir"
+
+
+async def test_two_candidates_still_denied_even_when_unique_on_screen():
+    """When there are two candidates, the entity is not unique; gate must still deny."""
+    llm = FakeLlm([
+        reply(
+            escritura="update",
+            candidatos=[
+                {"nombre": "Ana Pérez", "dato_distintivo": "doc 111"},
+                {"nombre": "Ana Perez", "dato_distintivo": "doc 222"},
+            ],
+        )
+    ])
+    verdict = await run(llm, evidencia=ev(search=False))
+    assert verdict.decision == "denegar_final"
+
+
 def test_a_resolved_date_may_be_typed_in_the_format_the_app_uses():
     from aprendiz.agent.gate import allowed_values
 

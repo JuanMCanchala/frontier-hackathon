@@ -277,7 +277,11 @@ def _postcheck(
         names = [f"{c.nombre} ({c.dato_distintivo})" for c in reply.candidatos]
         return _deny("more than one entity matches", names, final=True)
     commits = accion.tipo in ("click", "double_click", "key")
-    searched = evidencia.capturas_busqueda or is_record_code(plan.entidad)
+    searched = (
+        evidencia.capturas_busqueda
+        or is_record_code(plan.entidad)
+        or len(reply.candidatos) == 1
+    )
     if plan.entidad and commits and reply.escritura in ("create", "update", "delete"):
         # Judged on the auditor's reading, not before it: a click that writes nothing (the
         # "what's new" notice of the incident theme, before any search) must not need a search.
