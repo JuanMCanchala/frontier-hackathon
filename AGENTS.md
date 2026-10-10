@@ -19,6 +19,16 @@ Contexto y reglas de trabajo para este repo. Léelo completo antes de cada tarea
 - No hardcodees casos del brief ni respuestas esperadas. El set de evaluación es oculto y trae casos nuevos.
 - Nada de secretos en el código ni en los logs. Las keys se leen de variables de entorno.
 
+## Colaboración
+
+Este repo es de JuanMCanchala (`JuanMCanchala/frontier-hackathon`). Colaboramos con permiso de escritura; no somos dueños.
+
+- Todos los commits van a `main`. No abras rama ni pull request por tarea: compartir una rama aparte fue lo que generó conflictos.
+- Antes de editar, `git pull --ff-only origin main`. Si no puede avanzar en fast-forward, integra con merge y no reescribas historia publicada. Si el conflicto no se resuelve con lo que dicen los dos lados, para y pregunta.
+- Cada tarea la ejecuta un solo agente. Ese agente hace solo los commits de su tarea: un cambio, un propósito, sin mezclar tareas ajenas en el mismo commit.
+- El push a `origin/main` es siempre fast-forward. Si lo rechazan, vuelve a integrar y reintenta. No cambies de rama para rodear el fallo.
+- Nunca hagas push forzado ni merge forzado (`--force`, `--force-with-lease`, `push -f`, merge con admin o saltando reglas). Solo si yo apruebo primero y, después de esa aprobación, te doy la indicación explícita. Sin las dos, ni lo intentes.
+
 ## Estándar de código
 
 - Código, identificadores y comentarios en inglés. Documentación del repo (README, diseño, spec, log) en español.
@@ -50,4 +60,5 @@ Consecuencias: <qué se vuelve más fácil / más difícil>
 
 - Commits pequeños y atómicos, en español, en imperativo y con prefijo convencional: `feat:`, `fix:`, `test:`, `docs:`, `refactor:`, `chore:`.
 - El mensaje explica el porqué cuando no es obvio. Sin firmas, sin trailers y sin texto generado de relleno.
-- No hagas commit ni push sin que te lo pida.
+- Cada commit de una tarea va a `main`, hecho por el agente de esa tarea. Commit y push fast-forward a `origin/main` forman parte de ejecutar la tarea. No reescribas historia publicada.
+- Push forzado y merge forzado están prohibidos salvo aprobación mía seguida de una indicación explícita.
