@@ -5,6 +5,7 @@ from typing import Any
 
 import httpx
 from eval.harness import Harness, HarnessEnv, Timings, write_results
+from eval.incidente import desktop_host
 from eval.report import render
 from eval.schema import parse_prueba
 from eval.vigilancia import InitialScreenWatch
@@ -292,3 +293,27 @@ async def test_watch_capture_failure_does_not_break_the_run(tmp_path: Path) -> N
     assert r.task_id == "task-1" and r.error_prueba is None
     assert any("captura de vigilancia falló" in a for a in r.avisos)
     assert _log(tmp_path)[0]["tipo"] == "error"
+
+
+async def test_watch_ignores_a_reference_from_another_desktop(tmp_path: Path) -> None:
+    calls = 0
+
+    async def capture() -> Image.Image:
+        nonlocal calls
+        calls += 1
+        return _screen((10, 10, 300, 190))
+
+    watch = _watch(tmp_path, capture)
+    meta = {"hora": "2026-10-10T12:00:00-05:00", "host": "sigecom.example", "dhash": {}}
+    (tmp_path / "inc" / "referencia" / "meta.json").write_text(json.dumps(meta))
+    watch.desktop_host = "localhost:6080"
+
+    assert await watch.check("B1") == []
+    assert calls == 0
+    assert any("otro escritorio" in n for n in watch.notices)
+    assert _log(tmp_path) == []
+
+
+def test_reference_records_its_desktop_host() -> None:
+    assert desktop_host("https://Sigecom.Example/") == "sigecom.example"
+    assert desktop_host("ws://localhost:6080/websockify") == "localhost:6080"

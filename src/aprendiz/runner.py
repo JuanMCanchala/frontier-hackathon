@@ -10,8 +10,3 @@ class Runner(Protocol):
         """Execute a task. Should release its desktop connection on cancellation;
         the supervisor revokes the lease and force-closes registered clients anyway."""
         ...
-
-
-class NotImplementedRunner:
-    async def run(self, ctx: RunContext) -> RunResult:
-        return RunResult(estado="fallida", resumen="El agente aún no está implementado.")

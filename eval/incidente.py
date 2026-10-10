@@ -17,6 +17,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import httpx
 from PIL import Image
@@ -109,18 +110,23 @@ async def do_round(base_url: str, password: str) -> RoundResult:
 # ---- persistence ----------------------------------------------------------------
 
 
+def desktop_host(url: str) -> str:
+    """Identifies which desktop a reference belongs to (host:port, lower case)."""
+    return urlsplit(url).netloc.lower()
+
+
 def _now() -> datetime:
     return datetime.now().astimezone()
 
 
-def save_reference(base: Path, captures: Capture, when: datetime) -> Path:
+def save_reference(base: Path, captures: Capture, when: datetime, host: str | None = None) -> Path:
     folder = base / "referencia"
     folder.mkdir(parents=True, exist_ok=True)
     hashes = {}
     for name, image in captures.items():
         image.save(folder / f"{name}.png")
         hashes[name] = f"{dhash(image):016x}"
-    meta = {"hora": when.isoformat(timespec="seconds"), "dhash": hashes}
+    meta = {"hora": when.isoformat(timespec="seconds"), "host": host, "dhash": hashes}
     (folder / "meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
     return folder
 
@@ -186,7 +192,7 @@ async def cmd_referencia(base: Path, lock: DesktopLock) -> int:
         result = await do_round(url, password)
     finally:
         lock.release()
-    folder = save_reference(base, result.captures, _now())
+    folder = save_reference(base, result.captures, _now(), desktop_host(url))
     print(f"Referencia guardada en {folder} (/health {result.health_code})")
     return 0
 
