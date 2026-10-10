@@ -29,8 +29,11 @@ PV_MAP = {
 REQUIRED_LITERALS = {
     "PV1": ["NIT", "ciudad", "Abarrotes Quintero S.A.S."],
     "PV2": ["ayer"],
+    "PV3": ["PD-0143", "mañana"],
+    "PV6": ["Distribuciones El Faro", "3009876543"],
     "PV7": ["Distribuciones El Faro"],
     "PV9": ["Ana Torres"],
+    "PV10": ["Ana Torres", "52345678", "3014445566"],
     "PV12": ["Ferretería Ruiz"],
 }
 
