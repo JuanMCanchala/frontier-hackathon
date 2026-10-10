@@ -11,7 +11,7 @@ from aprendiz.agent.fallback import ask_json_fb
 from aprendiz.agent.llm import ImageInput, Llm, LlmError, Message
 from aprendiz.agent.schemas import Action, Plan
 from aprendiz.agent.structured import InvalidReply
-from aprendiz.agent.textmatch import exact_hint, fragment_of, root_fragment_of, stems
+from aprendiz.agent.textmatch import exact_hint, fold, fragment_of, root_fragment_of, stems
 
 log = logging.getLogger(__name__)
 
@@ -132,9 +132,43 @@ def allowed_values(plan: Plan, parametros: dict[str, str]) -> set[str]:
                 values.add(_norm(raw))
     # Parameters are computed by code from the task and the app's date, never by a model.
     values.update(_norm(v) for v in parametros.values())
-    # The same date in the other formats an app may expect (2026-03-09 for 09/03/2026).
+    # The same date in the other formats an app may expect (2026-03-09 for 09/03/2026), and a
+    # number without its separators ("316 555 0099" -> "3165550099", "19.222.336" -> "19222336"):
+    # the official run saw both rejected by the app's validation.
     values.update(_norm(alt) for v in list(values) for alt in _date_variants(v))
+    values.update(alt for v in list(values) if (alt := _digits_only(v)))
     return values
+
+
+_NUMBER_WITH_SEPARATORS = re.compile(r"\+?[\d][\d\s.\-()]*\d")
+
+
+def _digits_only(value: str) -> str | None:
+    if not _NUMBER_WITH_SEPARATORS.fullmatch(value.strip()):
+        return None
+    digits = "".join(c for c in value if c.isdigit())
+    return digits if digits != value.strip() and len(digits) >= 5 else None
+
+
+_TASK_CODE = re.compile(r"\b[A-Z]{1,5}-\d{2,}\b")
+
+
+def task_record_code(tarea: str) -> str | None:
+    """A record code written in the task (F-2316, C-1045): it names one record by itself."""
+    m = _TASK_CODE.search(tarea or "")
+    return m.group(0) if m else None
+
+
+def _option_names(option: str, text: str) -> bool:
+    """A select option that carries a significant word of the text: "Dr. Andrés Salas Gutiérrez"
+    for a task that says "Salas". Options are bounded by the UI, never free text."""
+
+    def significant(value: str) -> set[str]:
+        return {
+            st for word, st in zip(fold(value).split(), stems(value), strict=True) if len(word) >= 4
+        }
+
+    return bool(significant(option) & significant(text))
 
 
 _DMY = re.compile(r"(\d{2})/(\d{2})/(\d{4})")
@@ -170,7 +204,10 @@ def value_allowed(
     if root_fragment_of(evidencia.tarea, value):
         return True
     wanted = stems(value)
-    return any(stems(o) == wanted for o in allowed_originals(plan, evidencia.parametros))
+    originals = allowed_originals(plan, evidencia.parametros)
+    if any(stems(o) == wanted for o in originals):
+        return True
+    return any(o.strip() and set(stems(o)) <= set(wanted) for o in originals)
 
 
 def allowed_originals(plan: Plan, parametros: dict[str, str]) -> list[str]:
@@ -214,6 +251,7 @@ def _is_filter_configuration(accion: Action, evidencia: EvidenceContext) -> bool
         return False
     items = _typed_items(accion)
     params = {_norm(v) for v in evidencia.parametros.values()}
+    params |= {_norm(alt) for v in list(params) for alt in _date_variants(v)}
     if not items:
         return False
     for value, is_select in items:
@@ -223,8 +261,11 @@ def _is_filter_configuration(accion: Action, evidencia: EvidenceContext) -> bool
             return False
         if fragment_of(evidencia.tarea, value):
             continue
-        if not (is_select and root_fragment_of(evidencia.tarea, value)):
-            return False
+        if is_select and (
+            root_fragment_of(evidencia.tarea, value) or _option_names(value, evidencia.tarea)
+        ):
+            continue
+        return False
     return True
 
 
@@ -273,11 +314,19 @@ def _postcheck(
     plan: Plan, accion: Action, reply: _AuditorReply, evidencia: EvidenceContext, state: GateState
 ) -> Verdict | None:
     """Rules the code enforces over what the auditor reported, whatever it decided."""
-    if len(reply.candidatos) > 1:
-        names = [f"{c.nombre} ({c.dato_distintivo})" for c in reply.candidatos]
+    # Only candidates that carry the entity's words count: the official run saw four different
+    # people listed from an unfiltered list end a task as "more than one entity matches".
+    entity = set(stems(plan.entidad)) if plan.entidad else set()
+    matching = [c for c in reply.candidatos if not entity or entity <= set(stems(c.nombre))]
+    if len(matching) > 1:
+        names = [f"{c.nombre} ({c.dato_distintivo})" for c in matching]
         return _deny("more than one entity matches", names, final=True)
     commits = accion.tipo in ("click", "double_click", "key")
-    searched = evidencia.capturas_busqueda or is_record_code(plan.entidad)
+    searched = (
+        evidencia.capturas_busqueda
+        or is_record_code(plan.entidad)
+        or task_record_code(evidencia.tarea) is not None
+    )
     if plan.entidad and commits and reply.escritura in ("create", "update", "delete"):
         # Judged on the auditor's reading, not before it: a click that writes nothing (the
         # "what's new" notice of the incident theme, before any search) must not need a search.
@@ -332,10 +381,11 @@ def _describe(
     action_json = accion.model_dump_json(
         exclude_none=True, exclude={"razon", "postcondicion", "memo"}
     )
+    code = plan.entidad if is_record_code(plan.entidad) else task_record_code(evidencia.tarea)
     code_note = (
-        f"ENTITY IS A RECORD CODE: {plan.entidad!r} names exactly one record, so no search "
+        f"ENTITY IS A RECORD CODE: {code!r} names exactly one record, so no search "
         "screenshot is needed; the entity is unique if the form shows that exact code.\n"
-        if is_record_code(plan.entidad)
+        if code
         else ""
     )
     text = (
