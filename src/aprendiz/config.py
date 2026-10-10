@@ -24,6 +24,11 @@ class Settings(BaseSettings):
     PREVIOUS_RELEASE_S: float = 3.0
     HOST: str = "0.0.0.0"
     PORT: int = 8000
+    LANGFUSE_HOST: str = ""
+    LANGFUSE_PUBLIC_KEY: str = ""
+    LANGFUSE_SECRET_KEY: str = ""
+    LANGFUSE_TIMEOUT_S: float = 5.0
+    LANGFUSE_RETRIES: int = 2
 
 
 @dataclass(frozen=True)
