@@ -206,3 +206,38 @@ def resolve_params(parametros: dict[str, str], hoy: date | None) -> dict[str, da
     anio_actual_inicio/fin, and ultimos_dias:N (the first day of the last N days).
     """
     return {name: _resolve(expr, hoy) for name, expr in parametros.items()}
+
+
+_DAY_MONTH = re.compile(r"\b(\d{1,2})\s+de\s+([a-z]+)(?:\s+(?:de|del)\s+(\d{4}))?")
+_MONTH_ALONE = re.compile(r"\b(?:en|de|del mes de|mes de)\s+([a-z]+)(?:\s+(?:de|del)\s+(\d{4}))?")
+
+
+def task_dates(tarea: str, hoy: date | None) -> dict[str, date]:
+    """Dates the task writes in words ("el 3 de noviembre", "en septiembre"), resolved by code.
+    The planner may leave them as plain text; without this the gate denied typing them as a
+    date ("not a value of the plan"). A day without a year takes the year of the app's today;
+    a month alone gives its first and last day. Nothing is returned when the year is unknown."""
+    text = _fold(tarea)
+    found: dict[str, date] = {}
+    for n, m in enumerate(_DAY_MONTH.finditer(text), 1):
+        month = _MONTHS.get(m.group(2))
+        year = int(m.group(3)) if m.group(3) else (hoy.year if hoy else None)
+        if month and year:
+            try:
+                found[f"fecha_texto_{n}"] = date(year, month, int(m.group(1)))
+            except ValueError:
+                continue
+    without_days = _DAY_MONTH.sub(" ", text)  # "3 de noviembre" is a day, not the whole month
+    for n, m in enumerate(_MONTH_ALONE.finditer(without_days), 1):
+        month = _MONTHS.get(m.group(1))
+        year = int(m.group(2)) if m.group(2) else (hoy.year if hoy else None)
+        if month and year:
+            start = date(year, month, 1)
+            found[f"mes_texto_{n}_inicio"] = start
+            found[f"mes_texto_{n}_fin"] = _month_end(start)
+    return found
+
+
+def mentions_dates(tarea: str) -> bool:
+    text = _fold(tarea)
+    return bool(_DAY_MONTH.search(text) or _MONTH_ALONE.search(text))

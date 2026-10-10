@@ -10,7 +10,14 @@ from aprendiz.agent.actor import ActorAdapter, ActorError, PixelJsonActor
 from aprendiz.agent.budget import Budget, BudgetExceeded, GlobalSpend, SpendFileError
 from aprendiz.agent.config import SCREEN_HEIGHT, SCREEN_WIDTH, AgentSettings
 from aprendiz.agent.episode import EndTask, Episode, Fin
-from aprendiz.agent.hoy import ParamError, needs_today, read_today, resolve_params
+from aprendiz.agent.hoy import (
+    ParamError,
+    mentions_dates,
+    needs_today,
+    read_today,
+    resolve_params,
+    task_dates,
+)
 from aprendiz.agent.llm import Llm, LlmError, OpenRouterClient
 from aprendiz.agent.planner import PlanError, plan_from_task
 from aprendiz.agent.schemas import Plan
@@ -238,9 +245,10 @@ class AgentRunner:
         self, ctx: RunContext, plan: Plan, classifier: Llm, first
     ) -> tuple[str | None, dict[str, str]] | Finish:
         hoy = None
-        if needs_today(plan.parametros):
+        in_words = mentions_dates(ctx.tarea)
+        if needs_today(plan.parametros) or in_words:
             hoy = await self._read_hoy(ctx, classifier, first)
-            if hoy is None:
+            if hoy is None and needs_today(plan.parametros):
                 names = ", ".join(plan.parametros)
                 return Finish.failed(
                     "error",
@@ -250,6 +258,8 @@ class AgentRunner:
             resolved = resolve_params(plan.parametros, hoy)
         except ParamError as exc:
             return Finish.failed("error", str(exc))
+        if in_words:
+            resolved = {**task_dates(ctx.tarea, hoy), **resolved}
         fmt = self._agent.DATE_FORMAT
         hoy_text = hoy.strftime(fmt) if hoy else None
         return hoy_text, {name: value.strftime(fmt) for name, value in resolved.items()}

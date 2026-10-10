@@ -445,3 +445,62 @@ def test_iso_date():
 
     assert iso_date("09/03/2026") == "2026-03-09"
     assert iso_date("2026-03-09") is None and iso_date("Pereira") is None
+
+
+def test_numbers_may_be_typed_without_their_separators():
+    from aprendiz.agent.gate import allowed_values
+
+    plan = Plan(
+        tipo="editar",
+        entidad="Carlos Núñez",
+        escrituras_permitidas=[
+            {"entidad": "Paciente", "accion": "update", "campos": {"tel": "316 555 0099"}}
+        ],
+    )
+    assert "3165550099" in allowed_values(plan, {})
+
+
+async def test_only_candidates_carrying_the_entity_count_as_homonyms():
+    """An unfiltered list of four different people ended a task as ambiguous."""
+    others = reply(
+        candidatos=[
+            {"nombre": "Eduardo Pineda Bonilla", "dato_distintivo": "CC 1"},
+            {"nombre": "Marcela Espinosa", "dato_distintivo": "CC 2"},
+            {"nombre": "Ana Pérez Gómez", "dato_distintivo": "CC 3"},
+        ]
+    )
+    assert (await run(FakeLlm([others]))).decision == "permitir"
+    twins = reply(
+        candidatos=[
+            {"nombre": "Ana Pérez", "dato_distintivo": "CC 3"},
+            {"nombre": "Ana Pérez", "dato_distintivo": "CC 4"},
+        ]
+    )
+    assert (await run(FakeLlm([twins]))).decision == "denegar_final"
+
+
+async def test_a_record_code_in_the_task_satisfies_uniqueness():
+    llm = FakeLlm([reply()])
+    evidencia = ev(search=False, tarea="Registra el pago de la factura F-2316 de Ana Pérez")
+    assert (await run(llm, evidencia=evidencia)).decision == "permitir"
+    assert "ENTITY IS A RECORD CODE: 'F-2316'" in llm.calls[0]["messages"][-1]["content"]
+
+
+async def test_a_filter_option_naming_the_task_configures_a_read_only_plan():
+    plan = Plan(tipo="preguntar", entidad=None)
+    action = Action(
+        tipo="fill_form",
+        campos=[
+            {
+                "x": 1,
+                "y": 1,
+                "etiqueta": "Médico",
+                "valor": "Dr. Andrés Salas Gutiérrez",
+                "tipo": "select",
+            }
+        ],
+    )
+    evidencia = ev(tarea="¿Cuántas citas atendió Salas el 9 de octubre?")
+    assert (await run(FakeLlm([]), plan=plan, accion=action, evidencia=evidencia)).decision == (
+        "permitir"
+    )

@@ -171,3 +171,17 @@ def test_last_month_across_a_year_boundary_and_a_monday_today():
         {"a": "semana_pasada_inicio", "b": "semana_pasada_fin", "c": "lunes"}, monday
     )
     assert out == {"a": date(2026, 10, 5), "b": date(2026, 10, 11), "c": date(2026, 10, 5)}
+
+
+def test_dates_written_in_words_are_resolved_with_the_apps_year():
+    from datetime import date
+
+    from aprendiz.agent.hoy import task_dates
+
+    got = task_dates(
+        "Bloquea el consultorio 305 del 3 de noviembre al 6 de noviembre", date(2026, 10, 13)
+    )
+    assert sorted(got.values()) == [date(2026, 11, 3), date(2026, 11, 6)]
+    month = task_dates("¿Cuántas citas se cancelaron en septiembre?", date(2026, 10, 13))
+    assert sorted(month.values()) == [date(2026, 9, 1), date(2026, 9, 30)]
+    assert task_dates("el 3 de noviembre", None) == {}

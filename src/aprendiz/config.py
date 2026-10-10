@@ -14,10 +14,10 @@ class Settings(BaseSettings):
     TEAM_TOKEN: str
     ACTOR_MODEL: str = "anthropic/claude-haiku-5.5"
     PLANNER_MODEL: str = "anthropic/claude-sonnet-5.5"
-    ACTOR_STOP_S: float = 250
-    TASK_DEADLINE_S: float = 285
-    TASK_BUDGET_USD: float = 0.15
-    GLOBAL_BUDGET_USD: float = 30
+    ACTOR_STOP_S: float = 262
+    TASK_DEADLINE_S: float = 292
+    TASK_BUDGET_USD: float = 1.00
+    GLOBAL_BUDGET_USD: float = 100
     TRACES_DIR: str = "traces"
     TASKS_DB: str = "data/tasks.sqlite3"
     STOP_GRACE_S: float = 2.0
