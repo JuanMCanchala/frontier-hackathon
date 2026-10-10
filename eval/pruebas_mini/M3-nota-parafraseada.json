@@ -1,0 +1,16 @@
+{
+  "id": "M3",
+  "nivel": "regular",
+  "instruccion": "Deja la nota del registro a1 en 'Condensador reemplazado, OK.'",
+  "estado_esperado": "terminada",
+  "diff_esperado": [
+    {
+      "entidad": "registros",
+      "id": "a1",
+      "campo": "note",
+      "accion": "update",
+      "valor": "Condensador reemplazado, OK."
+    }
+  ],
+  "lista_blanca": []
+}

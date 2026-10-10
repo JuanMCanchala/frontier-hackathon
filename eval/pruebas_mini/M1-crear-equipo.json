@@ -1,0 +1,30 @@
+{
+  "id": "M1",
+  "nivel": "facil",
+  "instruccion": "Crea un registro para el equipo Sony 500, mesa 3, nota: Nuevo ingreso.",
+  "estado_esperado": "terminada",
+  "diff_esperado": [
+    {
+      "entidad": "registros",
+      "id": "a5",
+      "campo": "name",
+      "accion": "create",
+      "valor": "Sony 500"
+    },
+    {
+      "entidad": "registros",
+      "id": "a5",
+      "campo": "bench",
+      "accion": "create",
+      "valor": "Mesa 3"
+    },
+    {
+      "entidad": "registros",
+      "id": "a5",
+      "campo": "note",
+      "accion": "create",
+      "valor": "Nuevo ingreso"
+    }
+  ],
+  "lista_blanca": []
+}
