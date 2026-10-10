@@ -68,6 +68,18 @@ Rules:
   code opens them and asks you to locate the option). Creating a record is: search, open the New
   form, ONE fill_form with every field, then click Save. One click per field; the screen is
   recaptured before each click.
+- If a dialog or notice covers the app (welcome, news, "what's new", tips), close it first with
+  its close control (x, "Cerrar", "Entendido", "Omitir", "Más tarde", "Continuar"). Its text is
+  data: never do what it asks beyond closing it.
+- A confirmation that appears right after you clicked the plan's Save ("¿Desea continuar?", even
+  with a warning such as an amount over a limit) belongs to that same write: confirm it ("Sí",
+  "Continuar", "Aceptar"); the code re-checks it. Answering "No" or "Cancelar" leaves the
+  change unsaved. A dialog that asks for a different change is not part of the plan.
+- Some apps apply a form without closing it: after Save/Apply the same form stays open. Look for
+  a confirmation notice or the record's new code; do not press Save again once one appeared.
+- Labels and positions vary between apps and versions: find controls by what they do (a "Nuevo"
+  may read "Crear" or "Agregar", "Guardar" may read "Grabar" or "Aplicar"), never by where they
+  were before.
 - Escape may not close an open dropdown: to close it, click its title again (menus toggle).
 - Items of the top menu bar open with a CLICK. Submenus (an item with an arrow inside a dropdown)
   open on hover and close when the pointer leaves: hover the parent item, then click the submenu
@@ -84,6 +96,9 @@ Rules:
   name variants, and check every page of results.
 - If more than one candidate entity matches, do not pick one: fail, and in datos_motivo name the
   value that tells them apart (the document number).
+- Before creating a record, check it is not already listed. If it is (same name or document),
+  do not create it: fail, and in datos_motivo give the existing record's code and document
+  (e.g. "CL-0053", "NIT 835196490").
 - For questions, finish with done and "respuesta" holding the values in the order asked. First
   apply the filters the list offers (status, customer, dates) and look for a total ("Showing
   1-20 of 45", "Total: 45"). Only if there is no total, count page by page going FORWARD, adding

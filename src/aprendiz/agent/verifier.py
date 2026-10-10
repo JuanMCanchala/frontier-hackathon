@@ -22,14 +22,17 @@ PROTOCOLS: dict[str, str] = {
     "crear": (
         "(a) At least one search for the entity, showing no matching record, is visible from "
         "before the creation. (b) After saving there is a persistence signal showing the created "
-        "record (a notice such as 'Cliente CL-0141 creado', or the record view with its code) AND "
-        "the target fields visible on screen match the plan's values. Do NOT require name "
-        "variants or every results page: that is the actor's policy, not evidence of the result."
+        "record (a notice such as 'Cliente CL-0141 creado', the record view with its code, or the "
+        "same form still open after applying it, now showing a confirmation or the new code: "
+        "some apps apply forms without closing them) AND the target fields visible on screen "
+        "match the plan's values. Do NOT require name variants or every results page: that is "
+        "the actor's policy, not evidence of the result."
     ),
     "editar": (
         "The entity was identified uniquely (a distinguishing datum such as a document number is "
         "visible) and, after saving, the target field shows the new value from the plan (in the "
-        "notice or in the reopened record)."
+        "notice, in the reopened record, or in the form still open after applying it with a "
+        "confirmation)."
     ),
     "preguntar": (
         "A wrong answer harms nothing in the app, so VETO only on contradicting evidence: a "
