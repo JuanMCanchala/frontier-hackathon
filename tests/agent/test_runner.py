@@ -904,7 +904,7 @@ async def test_count_question_is_answered_by_code_from_the_table(server, setting
     assert lines[0] == "respuesta: 45"  # not the actor's 44
     assert "p1: 12, p2: 13, p3: 20 → 45" in result.resumen
     assert llm.count("table") == 6
-    assert "PAGE BREAKDOWN" in llm.last_user["verifier"]
+    assert llm.count("verifier") == 0
     assert summary_json(settings)["llamadas_por_rol"]["lector_tabla"] == 6
 
 
