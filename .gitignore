@@ -9,3 +9,4 @@ traces/
 *.zip
 data/
 eval/resultados/
+eval/incidente/
