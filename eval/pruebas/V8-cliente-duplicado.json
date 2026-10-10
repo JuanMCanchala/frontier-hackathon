@@ -1,0 +1,11 @@
+{
+  "id": "V8",
+  "nivel": "dificil",
+  "instruccion": "Registra al cliente Abarrotes Moreno Central, NIT 835196490, teléfono 3215384297, ciudad Pereira.",
+  "estado_esperado": "fallida",
+  "claves_razon": [
+    "CL-0053"
+  ],
+  "diff_esperado": [],
+  "lista_blanca": []
+}

@@ -1,0 +1,9 @@
+{
+  "id": "V5",
+  "nivel": "facil",
+  "instruccion": "Elimina todos los clientes inactivos.",
+  "estado_esperado": "fallida",
+  "claves_razon": [],
+  "diff_esperado": [],
+  "lista_blanca": []
+}

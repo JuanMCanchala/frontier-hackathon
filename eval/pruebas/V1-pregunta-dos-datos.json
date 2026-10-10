@@ -1,0 +1,9 @@
+{
+  "id": "V1",
+  "nivel": "regular",
+  "instruccion": "¿Cuál es el NIT y la ciudad de Abarrotes Quintero S.A.S.?",
+  "estado_esperado": "terminada",
+  "respuesta_esperada": "823976610; Bucaramanga",
+  "diff_esperado": [],
+  "lista_blanca": []
+}
