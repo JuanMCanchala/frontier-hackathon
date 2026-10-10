@@ -248,9 +248,7 @@ class AppMemory:
 
     def invalidate_route(self, route_id: str) -> None:
         with self._lock, self._conn:
-            self._conn.execute(
-                "UPDATE menu_routes SET invalidated=1 WHERE route_id=?", (route_id,)
-            )
+            self._conn.execute("UPDATE menu_routes SET invalidated=1 WHERE route_id=?", (route_id,))
 
     def invalidate_procedure(self, procedure_id: str) -> None:
         with self._lock, self._conn:

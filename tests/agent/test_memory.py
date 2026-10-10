@@ -159,9 +159,7 @@ def test_session_invalidates_only_the_loaded_procedure(tmp_path: Path) -> None:
 def test_session_write_failure_does_not_raise(tmp_path: Path) -> None:
     store = AppMemory(tmp_path / "app_memory.sqlite3")
     app = identity()
-    session = MemorySession(
-        store, app, used_procedure_ids=("missing",), business_values=()
-    )
+    session = MemorySession(store, app, used_procedure_ids=("missing",), business_values=())
     store.close()
     session.note_navigation("Clientes")
     session.note_action("click")
